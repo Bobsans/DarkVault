@@ -1,0 +1,15 @@
+name: darkvault-cli
+arch: amd64
+platform: linux
+version: 1.0.0
+maintainer: Bobsans
+description: HTTPS and JWE client for DarkVault scoped secret buckets
+license: MIT
+
+contents:
+  - src: ../artifacts/cli/darkvault
+    dst: /usr/bin/darkvault
+  - src: ../docs/operations.md
+    dst: /usr/share/doc/darkvault-cli/operations.md
+  - src: ../LICENSE
+    dst: /usr/share/doc/darkvault-cli/copyright

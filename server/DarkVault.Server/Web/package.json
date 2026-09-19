@@ -1,0 +1,12 @@
+{
+  "name": "darkvault-admin",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "esbuild app.js --bundle --format=esm --minify --outfile=../wwwroot/app.js",
+    "test": "node --test protocol.test.js",
+    "test:e2e": "playwright test"
+  },
+  "dependencies": { "jose": "6.2.12" },
+  "devDependencies": { "esbuild": "0.28.2", "@playwright/test": "1.63.0" }
+}

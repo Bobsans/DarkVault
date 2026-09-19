@@ -1,0 +1,4 @@
+* text=auto eol=lf
+*.pfx binary
+*.p12 binary
+*.png binary

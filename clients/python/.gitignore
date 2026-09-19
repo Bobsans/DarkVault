@@ -1,0 +1,9 @@
+# Python bytecode and local environment
+__pycache__/
+*.py[cod]
+/.venv/
+
+# setuptools and package builds
+*.egg-info/
+/build/
+/dist/

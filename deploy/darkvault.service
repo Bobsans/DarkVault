@@ -1,0 +1,22 @@
+[Unit]
+Description=DarkVault secret server
+After=network.target
+
+[Service]
+Type=simple
+User=darkvault
+Group=darkvault
+WorkingDirectory=/opt/darkvault
+Environment=DARKVAULT_DATA=/var/lib/darkvault
+Environment=ASPNETCORE_URLS=http://127.0.0.1:8866
+ExecStart=/usr/bin/dotnet /opt/darkvault/DarkVault.Server.dll serve
+Restart=on-failure
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/darkvault
+
+[Install]
+WantedBy=multi-user.target

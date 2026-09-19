@@ -1,0 +1,40 @@
+# IDE and editor state
+.idea/
+.vs/
+.vscode/
+*.user
+*.suo
+*.iml
+_ReSharper.Caches/
+.DS_Store
+Thumbs.db
+
+# Build and test output
+bin/
+obj/
+/artifacts/
+
+# Local secrets, certificates, and databases
+/.local/
+*.token
+.env
+.env.*
+!.env.example
+*.pfx
+*.p12
+*.key
+*.pem
+*.crt
+*.db
+*.db-*
+
+# Private server state
+/data/
+keyring.json
+server.lock
+
+# Admin frontend dependencies and test output
+/server/DarkVault.Server/Web/node_modules/
+/server/DarkVault.Server/Web/.pnpm-store/
+/server/DarkVault.Server/Web/playwright-report/
+/server/DarkVault.Server/Web/test-results/

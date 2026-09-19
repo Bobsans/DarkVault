@@ -1,0 +1,3 @@
+# Locally packed NuGet artifacts
+*.nupkg
+*.snupkg

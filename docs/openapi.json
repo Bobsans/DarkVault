@@ -1,0 +1,3068 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "DarkVault",
+    "version": "1.0.0",
+    "description": "HTTPS is mandatory. See protocol.md for JWE and authorization requirements."
+  },
+  "paths": {
+    "/api/v1/execute": {
+      "post": {
+        "operationId": "execute",
+        "security": [
+          {
+            "BearerToken": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/jose": {
+              "schema": {
+                "$ref": "#/components/schemas/JweCompact"
+              }
+            }
+          }
+        },
+        "x-decrypted-request": {
+          "oneOf": [
+            {
+              "$ref": "#/components/schemas/bucket.create.Request"
+            },
+            {
+              "$ref": "#/components/schemas/bucket.get.Request"
+            },
+            {
+              "$ref": "#/components/schemas/bucket.list.Request"
+            },
+            {
+              "$ref": "#/components/schemas/bucket.read.Request"
+            },
+            {
+              "$ref": "#/components/schemas/bucket.update.Request"
+            },
+            {
+              "$ref": "#/components/schemas/bucket.delete.Request"
+            },
+            {
+              "$ref": "#/components/schemas/secret.create.Request"
+            },
+            {
+              "$ref": "#/components/schemas/secret.read.Request"
+            },
+            {
+              "$ref": "#/components/schemas/secret.list.Request"
+            },
+            {
+              "$ref": "#/components/schemas/secret.update.Request"
+            },
+            {
+              "$ref": "#/components/schemas/secret.set.Request"
+            },
+            {
+              "$ref": "#/components/schemas/secret.delete.Request"
+            },
+            {
+              "$ref": "#/components/schemas/token.info.Request"
+            }
+          ]
+        },
+        "x-decrypted-response": {
+          "oneOf": [
+            {
+              "$ref": "#/components/schemas/bucket.create.Response"
+            },
+            {
+              "$ref": "#/components/schemas/bucket.get.Response"
+            },
+            {
+              "$ref": "#/components/schemas/bucket.list.Response"
+            },
+            {
+              "$ref": "#/components/schemas/bucket.read.Response"
+            },
+            {
+              "$ref": "#/components/schemas/bucket.update.Response"
+            },
+            {
+              "$ref": "#/components/schemas/bucket.delete.Response"
+            },
+            {
+              "$ref": "#/components/schemas/secret.create.Response"
+            },
+            {
+              "$ref": "#/components/schemas/secret.read.Response"
+            },
+            {
+              "$ref": "#/components/schemas/secret.list.Response"
+            },
+            {
+              "$ref": "#/components/schemas/secret.update.Response"
+            },
+            {
+              "$ref": "#/components/schemas/secret.set.Response"
+            },
+            {
+              "$ref": "#/components/schemas/secret.delete.Response"
+            },
+            {
+              "$ref": "#/components/schemas/token.info.Response"
+            }
+          ]
+        },
+        "responses": {
+          "200": {
+            "description": "Encrypted result",
+            "content": {
+              "application/jose": {
+                "schema": {
+                  "$ref": "#/components/schemas/JweCompact"
+                }
+              }
+            }
+          },
+          "201": {
+            "description": "Encrypted creation result"
+          },
+          "default": {
+            "description": "Encrypted application error, or non-secret JSON error before envelope validation"
+          }
+        }
+      }
+    },
+    "/admin/api/v1/execute": {
+      "post": {
+        "operationId": "adminExecute",
+        "security": [
+          {
+            "AdminSession": [],
+            "Csrf": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/jose": {
+              "schema": {
+                "$ref": "#/components/schemas/JweCompact"
+              }
+            }
+          }
+        },
+        "x-decrypted-request": {
+          "oneOf": [
+            {
+              "$ref": "#/components/schemas/bucket.create.Request"
+            },
+            {
+              "$ref": "#/components/schemas/bucket.get.Request"
+            },
+            {
+              "$ref": "#/components/schemas/bucket.list.Request"
+            },
+            {
+              "$ref": "#/components/schemas/bucket.read.Request"
+            },
+            {
+              "$ref": "#/components/schemas/bucket.update.Request"
+            },
+            {
+              "$ref": "#/components/schemas/bucket.delete.Request"
+            },
+            {
+              "$ref": "#/components/schemas/secret.create.Request"
+            },
+            {
+              "$ref": "#/components/schemas/secret.read.Request"
+            },
+            {
+              "$ref": "#/components/schemas/secret.list.Request"
+            },
+            {
+              "$ref": "#/components/schemas/secret.update.Request"
+            },
+            {
+              "$ref": "#/components/schemas/secret.set.Request"
+            },
+            {
+              "$ref": "#/components/schemas/secret.delete.Request"
+            },
+            {
+              "$ref": "#/components/schemas/token.create.Request"
+            },
+            {
+              "$ref": "#/components/schemas/token.list.Request"
+            },
+            {
+              "$ref": "#/components/schemas/token.revoke.Request"
+            },
+            {
+              "$ref": "#/components/schemas/audit.list.Request"
+            }
+          ]
+        },
+        "x-decrypted-response": {
+          "oneOf": [
+            {
+              "$ref": "#/components/schemas/bucket.create.Response"
+            },
+            {
+              "$ref": "#/components/schemas/bucket.get.Response"
+            },
+            {
+              "$ref": "#/components/schemas/bucket.list.Response"
+            },
+            {
+              "$ref": "#/components/schemas/bucket.read.Response"
+            },
+            {
+              "$ref": "#/components/schemas/bucket.update.Response"
+            },
+            {
+              "$ref": "#/components/schemas/bucket.delete.Response"
+            },
+            {
+              "$ref": "#/components/schemas/secret.create.Response"
+            },
+            {
+              "$ref": "#/components/schemas/secret.read.Response"
+            },
+            {
+              "$ref": "#/components/schemas/secret.list.Response"
+            },
+            {
+              "$ref": "#/components/schemas/secret.update.Response"
+            },
+            {
+              "$ref": "#/components/schemas/secret.set.Response"
+            },
+            {
+              "$ref": "#/components/schemas/secret.delete.Response"
+            },
+            {
+              "$ref": "#/components/schemas/token.create.Response"
+            },
+            {
+              "$ref": "#/components/schemas/token.list.Response"
+            },
+            {
+              "$ref": "#/components/schemas/token.revoke.Response"
+            },
+            {
+              "$ref": "#/components/schemas/audit.list.Response"
+            }
+          ]
+        },
+        "responses": {
+          "200": {
+            "description": "Encrypted result",
+            "content": {
+              "application/jose": {
+                "schema": {
+                  "$ref": "#/components/schemas/JweCompact"
+                }
+              }
+            }
+          },
+          "201": {
+            "description": "Encrypted creation result"
+          },
+          "default": {
+            "description": "Encrypted application error, or non-secret JSON error before envelope validation"
+          }
+        }
+      }
+    },
+    "/api/v1/crypto/key": {
+      "get": {
+        "operationId": "getCryptoKey",
+        "responses": {
+          "200": {
+            "description": "Current server public key",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CryptoKey"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/admin/api/v1/session": {
+      "get": {
+        "operationId": "getAdminSession",
+        "responses": {
+          "200": {
+            "description": "Authentication state and CSRF token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "authenticated": {
+                      "type": "boolean"
+                    },
+                    "csrfToken": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "authenticated",
+                    "csrfToken"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/admin/login": {
+      "post": {
+        "operationId": "adminLogin",
+        "security": [
+          {
+            "Csrf": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "username": {
+                    "type": "string"
+                  },
+                  "password": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "username",
+                  "password"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Completed"
+          },
+          "400": {
+            "description": "Invalid input or CSRF"
+          },
+          "401": {
+            "description": "Authentication required"
+          }
+        }
+      }
+    },
+    "/admin/logout": {
+      "post": {
+        "operationId": "adminLogout",
+        "security": [
+          {
+            "AdminSession": [],
+            "Csrf": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {},
+                "required": [],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Completed"
+          },
+          "400": {
+            "description": "Invalid input or CSRF"
+          },
+          "401": {
+            "description": "Authentication required"
+          }
+        }
+      }
+    },
+    "/admin/password": {
+      "post": {
+        "operationId": "adminPassword",
+        "security": [
+          {
+            "AdminSession": [],
+            "Csrf": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "currentPassword": {
+                    "type": "string"
+                  },
+                  "newPassword": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "currentPassword",
+                  "newPassword"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Completed"
+          },
+          "400": {
+            "description": "Invalid input or CSRF"
+          },
+          "401": {
+            "description": "Authentication required"
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "BearerToken": {
+        "type": "http",
+        "scheme": "bearer"
+      },
+      "AdminSession": {
+        "type": "apiKey",
+        "in": "cookie",
+        "name": "__Host-DarkVault"
+      },
+      "Csrf": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "X-CSRF-Token"
+      }
+    },
+    "schemas": {
+      "PublicKey": {
+        "type": "object",
+        "properties": {
+          "kty": {
+            "const": "EC"
+          },
+          "crv": {
+            "const": "P-256"
+          },
+          "x": {
+            "type": "string"
+          },
+          "y": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "kty",
+          "crv",
+          "x",
+          "y"
+        ],
+        "additionalProperties": false
+      },
+      "Bucket": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "revision": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "description",
+          "revision",
+          "createdAt",
+          "updatedAt"
+        ],
+        "additionalProperties": false
+      },
+      "SecretMetadata": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "bucketId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "key": {
+            "type": "string"
+          },
+          "revision": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "bucketId",
+          "key",
+          "revision",
+          "createdAt",
+          "updatedAt"
+        ],
+        "additionalProperties": false
+      },
+      "TokenInfo": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string"
+          },
+          "scopes": {
+            "type": "array",
+            "items": {
+              "enum": [
+                "secret:read",
+                "secret:write",
+                "secret:delete",
+                "secret:list",
+                "bucket:create",
+                "bucket:read",
+                "bucket:list",
+                "bucket:delete",
+                "bucket:write"
+              ]
+            }
+          },
+          "bucketIds": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "allBuckets": {
+            "type": "boolean"
+          },
+          "creatableBucketNames": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "expiresAt": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "scopes",
+          "bucketIds",
+          "allBuckets",
+          "creatableBucketNames",
+          "expiresAt"
+        ],
+        "additionalProperties": false
+      },
+      "Error": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message"
+        ],
+        "additionalProperties": false
+      },
+      "BucketSnapshot": {
+        "type": "object",
+        "properties": {
+          "bucketId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "revision": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "secrets": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "bucketId",
+          "revision",
+          "secrets"
+        ],
+        "additionalProperties": false
+      },
+      "CryptoKey": {
+        "type": "object",
+        "properties": {
+          "protocolVersion": {
+            "const": 1
+          },
+          "serverId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "serverTime": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "kid": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "publicKey": {
+            "$ref": "#/components/schemas/PublicKey"
+          },
+          "notAfter": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "limits": {
+            "type": "object",
+            "properties": {
+              "maxBodyBytes": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "maxPlaintextBytes": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              }
+            },
+            "required": [
+              "maxBodyBytes",
+              "maxPlaintextBytes"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "protocolVersion",
+          "serverId",
+          "serverTime",
+          "kid",
+          "publicKey",
+          "notAfter",
+          "limits"
+        ],
+        "additionalProperties": false
+      },
+      "JweCompact": {
+        "type": "string",
+        "maxLength": 2097152,
+        "description": "ECDH-ES/P-256/A256GCM compact JWE; plaintext schemas below are not sent unencrypted.",
+        "pattern": "^[A-Za-z0-9_-]+\\.\\.[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]*\\.[A-Za-z0-9_-]+$"
+      },
+      "PageParameters": {
+        "type": "object",
+        "properties": {
+          "cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 200
+          }
+        },
+        "required": [],
+        "additionalProperties": false
+      },
+      "Secret": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "bucketId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "key": {
+            "type": "string"
+          },
+          "revision": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "value": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "bucketId",
+          "key",
+          "revision",
+          "createdAt",
+          "updatedAt",
+          "value"
+        ],
+        "additionalProperties": false
+      },
+      "TokenRecord": {
+        "type": "object",
+        "properties": {
+          "info": {
+            "$ref": "#/components/schemas/TokenInfo"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "revokedAt": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "lastUsedAt": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "info",
+          "createdAt",
+          "revokedAt",
+          "lastUsedAt"
+        ],
+        "additionalProperties": false
+      },
+      "Audit": {
+        "type": "object",
+        "properties": {
+          "time": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "principal": {
+            "type": "string"
+          },
+          "operation": {
+            "type": "string"
+          },
+          "bucketId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "secretId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "requestId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "result": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "time",
+          "principal",
+          "operation",
+          "bucketId",
+          "secretId",
+          "requestId",
+          "result"
+        ],
+        "additionalProperties": false
+      },
+      "bucket.create.Request": {
+        "type": "object",
+        "properties": {
+          "v": {
+            "const": 1
+          },
+          "requestId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "issuedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "serverId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "audience": {
+            "enum": [
+              "data",
+              "admin"
+            ]
+          },
+          "operation": {
+            "const": "bucket.create"
+          },
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "description": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "name"
+            ],
+            "additionalProperties": false
+          },
+          "replyKey": {
+            "$ref": "#/components/schemas/PublicKey"
+          }
+        },
+        "required": [
+          "v",
+          "requestId",
+          "issuedAt",
+          "serverId",
+          "audience",
+          "operation",
+          "parameters",
+          "replyKey"
+        ],
+        "additionalProperties": false
+      },
+      "bucket.create.Response": {
+        "type": "object",
+        "properties": {
+          "v": {
+            "const": 1
+          },
+          "requestId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "serverId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "audience": {
+            "enum": [
+              "data",
+              "admin"
+            ]
+          },
+          "operation": {
+            "const": "bucket.create"
+          },
+          "status": {
+            "type": "integer"
+          },
+          "data": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Bucket"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "error": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Error"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "v",
+          "requestId",
+          "serverId",
+          "audience",
+          "operation",
+          "status",
+          "data",
+          "error"
+        ],
+        "additionalProperties": false
+      },
+      "bucket.get.Request": {
+        "type": "object",
+        "properties": {
+          "v": {
+            "const": 1
+          },
+          "requestId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "issuedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "serverId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "audience": {
+            "enum": [
+              "data",
+              "admin"
+            ]
+          },
+          "operation": {
+            "const": "bucket.get"
+          },
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "bucket": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "bucket"
+            ],
+            "additionalProperties": false
+          },
+          "replyKey": {
+            "$ref": "#/components/schemas/PublicKey"
+          }
+        },
+        "required": [
+          "v",
+          "requestId",
+          "issuedAt",
+          "serverId",
+          "audience",
+          "operation",
+          "parameters",
+          "replyKey"
+        ],
+        "additionalProperties": false
+      },
+      "bucket.get.Response": {
+        "type": "object",
+        "properties": {
+          "v": {
+            "const": 1
+          },
+          "requestId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "serverId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "audience": {
+            "enum": [
+              "data",
+              "admin"
+            ]
+          },
+          "operation": {
+            "const": "bucket.get"
+          },
+          "status": {
+            "type": "integer"
+          },
+          "data": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Bucket"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "error": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Error"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "v",
+          "requestId",
+          "serverId",
+          "audience",
+          "operation",
+          "status",
+          "data",
+          "error"
+        ],
+        "additionalProperties": false
+      },
+      "bucket.list.Request": {
+        "type": "object",
+        "properties": {
+          "v": {
+            "const": 1
+          },
+          "requestId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "issuedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "serverId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "audience": {
+            "enum": [
+              "data",
+              "admin"
+            ]
+          },
+          "operation": {
+            "const": "bucket.list"
+          },
+          "parameters": {
+            "$ref": "#/components/schemas/PageParameters"
+          },
+          "replyKey": {
+            "$ref": "#/components/schemas/PublicKey"
+          }
+        },
+        "required": [
+          "v",
+          "requestId",
+          "issuedAt",
+          "serverId",
+          "audience",
+          "operation",
+          "parameters",
+          "replyKey"
+        ],
+        "additionalProperties": false
+      },
+      "bucket.list.Response": {
+        "type": "object",
+        "properties": {
+          "v": {
+            "const": 1
+          },
+          "requestId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "serverId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "audience": {
+            "enum": [
+              "data",
+              "admin"
+            ]
+          },
+          "operation": {
+            "const": "bucket.list"
+          },
+          "status": {
+            "type": "integer"
+          },
+          "data": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "items": {
+                    "type": "array",
+                    "items": {
+                      "$ref": "#/components/schemas/Bucket"
+                    }
+                  },
+                  "nextCursor": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  }
+                },
+                "required": [
+                  "items",
+                  "nextCursor"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "error": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Error"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "v",
+          "requestId",
+          "serverId",
+          "audience",
+          "operation",
+          "status",
+          "data",
+          "error"
+        ],
+        "additionalProperties": false
+      },
+      "bucket.read.Request": {
+        "type": "object",
+        "properties": {
+          "v": {
+            "const": 1
+          },
+          "requestId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "issuedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "serverId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "audience": {
+            "enum": [
+              "data",
+              "admin"
+            ]
+          },
+          "operation": {
+            "const": "bucket.read"
+          },
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "bucket": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "bucket"
+            ],
+            "additionalProperties": false
+          },
+          "replyKey": {
+            "$ref": "#/components/schemas/PublicKey"
+          }
+        },
+        "required": [
+          "v",
+          "requestId",
+          "issuedAt",
+          "serverId",
+          "audience",
+          "operation",
+          "parameters",
+          "replyKey"
+        ],
+        "additionalProperties": false
+      },
+      "bucket.read.Response": {
+        "type": "object",
+        "properties": {
+          "v": {
+            "const": 1
+          },
+          "requestId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "serverId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "audience": {
+            "enum": [
+              "data",
+              "admin"
+            ]
+          },
+          "operation": {
+            "const": "bucket.read"
+          },
+          "status": {
+            "type": "integer"
+          },
+          "data": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/BucketSnapshot"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "error": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Error"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "v",
+          "requestId",
+          "serverId",
+          "audience",
+          "operation",
+          "status",
+          "data",
+          "error"
+        ],
+        "additionalProperties": false
+      },
+      "bucket.update.Request": {
+        "type": "object",
+        "properties": {
+          "v": {
+            "const": 1
+          },
+          "requestId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "issuedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "serverId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "audience": {
+            "enum": [
+              "data",
+              "admin"
+            ]
+          },
+          "operation": {
+            "const": "bucket.update"
+          },
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "bucket": {
+                "type": "string"
+              },
+              "description": {
+                "type": "string"
+              },
+              "expectedRevision": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              }
+            },
+            "required": [
+              "bucket",
+              "description",
+              "expectedRevision"
+            ],
+            "additionalProperties": false
+          },
+          "replyKey": {
+            "$ref": "#/components/schemas/PublicKey"
+          }
+        },
+        "required": [
+          "v",
+          "requestId",
+          "issuedAt",
+          "serverId",
+          "audience",
+          "operation",
+          "parameters",
+          "replyKey"
+        ],
+        "additionalProperties": false
+      },
+      "bucket.update.Response": {
+        "type": "object",
+        "properties": {
+          "v": {
+            "const": 1
+          },
+          "requestId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "serverId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "audience": {
+            "enum": [
+              "data",
+              "admin"
+            ]
+          },
+          "operation": {
+            "const": "bucket.update"
+          },
+          "status": {
+            "type": "integer"
+          },
+          "data": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Bucket"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "error": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Error"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "v",
+          "requestId",
+          "serverId",
+          "audience",
+          "operation",
+          "status",
+          "data",
+          "error"
+        ],
+        "additionalProperties": false
+      },
+      "bucket.delete.Request": {
+        "type": "object",
+        "properties": {
+          "v": {
+            "const": 1
+          },
+          "requestId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "issuedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "serverId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "audience": {
+            "enum": [
+              "data",
+              "admin"
+            ]
+          },
+          "operation": {
+            "const": "bucket.delete"
+          },
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "bucket": {
+                "type": "string"
+              },
+              "expectedRevision": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "recursive": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "bucket",
+              "expectedRevision"
+            ],
+            "additionalProperties": false
+          },
+          "replyKey": {
+            "$ref": "#/components/schemas/PublicKey"
+          }
+        },
+        "required": [
+          "v",
+          "requestId",
+          "issuedAt",
+          "serverId",
+          "audience",
+          "operation",
+          "parameters",
+          "replyKey"
+        ],
+        "additionalProperties": false
+      },
+      "bucket.delete.Response": {
+        "type": "object",
+        "properties": {
+          "v": {
+            "const": 1
+          },
+          "requestId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "serverId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "audience": {
+            "enum": [
+              "data",
+              "admin"
+            ]
+          },
+          "operation": {
+            "const": "bucket.delete"
+          },
+          "status": {
+            "type": "integer"
+          },
+          "data": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "deleted": {
+                    "const": true
+                  }
+                },
+                "required": [
+                  "deleted"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "error": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Error"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "v",
+          "requestId",
+          "serverId",
+          "audience",
+          "operation",
+          "status",
+          "data",
+          "error"
+        ],
+        "additionalProperties": false
+      },
+      "secret.create.Request": {
+        "type": "object",
+        "properties": {
+          "v": {
+            "const": 1
+          },
+          "requestId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "issuedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "serverId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "audience": {
+            "enum": [
+              "data",
+              "admin"
+            ]
+          },
+          "operation": {
+            "const": "secret.create"
+          },
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "bucket": {
+                "type": "string"
+              },
+              "key": {
+                "type": "string"
+              },
+              "value": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "bucket",
+              "key",
+              "value"
+            ],
+            "additionalProperties": false
+          },
+          "replyKey": {
+            "$ref": "#/components/schemas/PublicKey"
+          }
+        },
+        "required": [
+          "v",
+          "requestId",
+          "issuedAt",
+          "serverId",
+          "audience",
+          "operation",
+          "parameters",
+          "replyKey"
+        ],
+        "additionalProperties": false
+      },
+      "secret.create.Response": {
+        "type": "object",
+        "properties": {
+          "v": {
+            "const": 1
+          },
+          "requestId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "serverId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "audience": {
+            "enum": [
+              "data",
+              "admin"
+            ]
+          },
+          "operation": {
+            "const": "secret.create"
+          },
+          "status": {
+            "type": "integer"
+          },
+          "data": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SecretMetadata"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "error": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Error"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "v",
+          "requestId",
+          "serverId",
+          "audience",
+          "operation",
+          "status",
+          "data",
+          "error"
+        ],
+        "additionalProperties": false
+      },
+      "secret.read.Request": {
+        "type": "object",
+        "properties": {
+          "v": {
+            "const": 1
+          },
+          "requestId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "issuedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "serverId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "audience": {
+            "enum": [
+              "data",
+              "admin"
+            ]
+          },
+          "operation": {
+            "const": "secret.read"
+          },
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "bucket": {
+                "type": "string"
+              },
+              "key": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "bucket",
+              "key"
+            ],
+            "additionalProperties": false
+          },
+          "replyKey": {
+            "$ref": "#/components/schemas/PublicKey"
+          }
+        },
+        "required": [
+          "v",
+          "requestId",
+          "issuedAt",
+          "serverId",
+          "audience",
+          "operation",
+          "parameters",
+          "replyKey"
+        ],
+        "additionalProperties": false
+      },
+      "secret.read.Response": {
+        "type": "object",
+        "properties": {
+          "v": {
+            "const": 1
+          },
+          "requestId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "serverId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "audience": {
+            "enum": [
+              "data",
+              "admin"
+            ]
+          },
+          "operation": {
+            "const": "secret.read"
+          },
+          "status": {
+            "type": "integer"
+          },
+          "data": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Secret"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "error": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Error"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "v",
+          "requestId",
+          "serverId",
+          "audience",
+          "operation",
+          "status",
+          "data",
+          "error"
+        ],
+        "additionalProperties": false
+      },
+      "secret.list.Request": {
+        "type": "object",
+        "properties": {
+          "v": {
+            "const": 1
+          },
+          "requestId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "issuedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "serverId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "audience": {
+            "enum": [
+              "data",
+              "admin"
+            ]
+          },
+          "operation": {
+            "const": "secret.list"
+          },
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "bucket": {
+                "type": "string"
+              },
+              "cursor": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "limit": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 200
+              }
+            },
+            "required": [
+              "bucket"
+            ],
+            "additionalProperties": false
+          },
+          "replyKey": {
+            "$ref": "#/components/schemas/PublicKey"
+          }
+        },
+        "required": [
+          "v",
+          "requestId",
+          "issuedAt",
+          "serverId",
+          "audience",
+          "operation",
+          "parameters",
+          "replyKey"
+        ],
+        "additionalProperties": false
+      },
+      "secret.list.Response": {
+        "type": "object",
+        "properties": {
+          "v": {
+            "const": 1
+          },
+          "requestId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "serverId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "audience": {
+            "enum": [
+              "data",
+              "admin"
+            ]
+          },
+          "operation": {
+            "const": "secret.list"
+          },
+          "status": {
+            "type": "integer"
+          },
+          "data": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "items": {
+                    "type": "array",
+                    "items": {
+                      "$ref": "#/components/schemas/SecretMetadata"
+                    }
+                  },
+                  "nextCursor": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  }
+                },
+                "required": [
+                  "items",
+                  "nextCursor"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "error": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Error"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "v",
+          "requestId",
+          "serverId",
+          "audience",
+          "operation",
+          "status",
+          "data",
+          "error"
+        ],
+        "additionalProperties": false
+      },
+      "secret.update.Request": {
+        "type": "object",
+        "properties": {
+          "v": {
+            "const": 1
+          },
+          "requestId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "issuedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "serverId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "audience": {
+            "enum": [
+              "data",
+              "admin"
+            ]
+          },
+          "operation": {
+            "const": "secret.update"
+          },
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "bucket": {
+                "type": "string"
+              },
+              "key": {
+                "type": "string"
+              },
+              "value": {
+                "type": "string"
+              },
+              "expectedRevision": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              }
+            },
+            "required": [
+              "bucket",
+              "key",
+              "value",
+              "expectedRevision"
+            ],
+            "additionalProperties": false
+          },
+          "replyKey": {
+            "$ref": "#/components/schemas/PublicKey"
+          }
+        },
+        "required": [
+          "v",
+          "requestId",
+          "issuedAt",
+          "serverId",
+          "audience",
+          "operation",
+          "parameters",
+          "replyKey"
+        ],
+        "additionalProperties": false
+      },
+      "secret.update.Response": {
+        "type": "object",
+        "properties": {
+          "v": {
+            "const": 1
+          },
+          "requestId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "serverId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "audience": {
+            "enum": [
+              "data",
+              "admin"
+            ]
+          },
+          "operation": {
+            "const": "secret.update"
+          },
+          "status": {
+            "type": "integer"
+          },
+          "data": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SecretMetadata"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "error": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Error"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "v",
+          "requestId",
+          "serverId",
+          "audience",
+          "operation",
+          "status",
+          "data",
+          "error"
+        ],
+        "additionalProperties": false
+      },
+      "secret.set.Request": {
+        "type": "object",
+        "properties": {
+          "v": {
+            "const": 1
+          },
+          "requestId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "issuedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "serverId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "audience": {
+            "enum": [
+              "data",
+              "admin"
+            ]
+          },
+          "operation": {
+            "const": "secret.set"
+          },
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "bucket": {
+                "type": "string"
+              },
+              "key": {
+                "type": "string"
+              },
+              "value": {
+                "type": "string"
+              },
+              "expectedRevision": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              }
+            },
+            "required": [
+              "bucket",
+              "key",
+              "value",
+              "expectedRevision"
+            ],
+            "additionalProperties": false
+          },
+          "replyKey": {
+            "$ref": "#/components/schemas/PublicKey"
+          }
+        },
+        "required": [
+          "v",
+          "requestId",
+          "issuedAt",
+          "serverId",
+          "audience",
+          "operation",
+          "parameters",
+          "replyKey"
+        ],
+        "additionalProperties": false
+      },
+      "secret.set.Response": {
+        "type": "object",
+        "properties": {
+          "v": {
+            "const": 1
+          },
+          "requestId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "serverId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "audience": {
+            "enum": [
+              "data",
+              "admin"
+            ]
+          },
+          "operation": {
+            "const": "secret.set"
+          },
+          "status": {
+            "type": "integer"
+          },
+          "data": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SecretMetadata"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "error": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Error"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "v",
+          "requestId",
+          "serverId",
+          "audience",
+          "operation",
+          "status",
+          "data",
+          "error"
+        ],
+        "additionalProperties": false
+      },
+      "secret.delete.Request": {
+        "type": "object",
+        "properties": {
+          "v": {
+            "const": 1
+          },
+          "requestId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "issuedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "serverId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "audience": {
+            "enum": [
+              "data",
+              "admin"
+            ]
+          },
+          "operation": {
+            "const": "secret.delete"
+          },
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "bucket": {
+                "type": "string"
+              },
+              "key": {
+                "type": "string"
+              },
+              "expectedRevision": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              }
+            },
+            "required": [
+              "bucket",
+              "key",
+              "expectedRevision"
+            ],
+            "additionalProperties": false
+          },
+          "replyKey": {
+            "$ref": "#/components/schemas/PublicKey"
+          }
+        },
+        "required": [
+          "v",
+          "requestId",
+          "issuedAt",
+          "serverId",
+          "audience",
+          "operation",
+          "parameters",
+          "replyKey"
+        ],
+        "additionalProperties": false
+      },
+      "secret.delete.Response": {
+        "type": "object",
+        "properties": {
+          "v": {
+            "const": 1
+          },
+          "requestId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "serverId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "audience": {
+            "enum": [
+              "data",
+              "admin"
+            ]
+          },
+          "operation": {
+            "const": "secret.delete"
+          },
+          "status": {
+            "type": "integer"
+          },
+          "data": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "deleted": {
+                    "const": true
+                  }
+                },
+                "required": [
+                  "deleted"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "error": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Error"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "v",
+          "requestId",
+          "serverId",
+          "audience",
+          "operation",
+          "status",
+          "data",
+          "error"
+        ],
+        "additionalProperties": false
+      },
+      "token.info.Request": {
+        "type": "object",
+        "properties": {
+          "v": {
+            "const": 1
+          },
+          "requestId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "issuedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "serverId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "audience": {
+            "enum": [
+              "data",
+              "admin"
+            ]
+          },
+          "operation": {
+            "const": "token.info"
+          },
+          "parameters": {
+            "type": "object",
+            "properties": {},
+            "required": [],
+            "additionalProperties": false
+          },
+          "replyKey": {
+            "$ref": "#/components/schemas/PublicKey"
+          }
+        },
+        "required": [
+          "v",
+          "requestId",
+          "issuedAt",
+          "serverId",
+          "audience",
+          "operation",
+          "parameters",
+          "replyKey"
+        ],
+        "additionalProperties": false
+      },
+      "token.info.Response": {
+        "type": "object",
+        "properties": {
+          "v": {
+            "const": 1
+          },
+          "requestId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "serverId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "audience": {
+            "enum": [
+              "data",
+              "admin"
+            ]
+          },
+          "operation": {
+            "const": "token.info"
+          },
+          "status": {
+            "type": "integer"
+          },
+          "data": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TokenInfo"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "error": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Error"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "v",
+          "requestId",
+          "serverId",
+          "audience",
+          "operation",
+          "status",
+          "data",
+          "error"
+        ],
+        "additionalProperties": false
+      },
+      "token.create.Request": {
+        "type": "object",
+        "properties": {
+          "v": {
+            "const": 1
+          },
+          "requestId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "issuedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "serverId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "audience": {
+            "enum": [
+              "data",
+              "admin"
+            ]
+          },
+          "operation": {
+            "const": "token.create"
+          },
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "scopes": {
+                "type": "array",
+                "items": {
+                  "enum": [
+                    "secret:read",
+                    "secret:write",
+                    "secret:delete",
+                    "secret:list",
+                    "bucket:create",
+                    "bucket:read",
+                    "bucket:list",
+                    "bucket:delete",
+                    "bucket:write"
+                  ]
+                }
+              },
+              "bucketIds": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "format": "uuid"
+                }
+              },
+              "allBuckets": {
+                "type": "boolean"
+              },
+              "creatableBucketNames": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "expiresAt": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            },
+            "required": [
+              "name",
+              "scopes",
+              "bucketIds",
+              "creatableBucketNames"
+            ],
+            "additionalProperties": false
+          },
+          "replyKey": {
+            "$ref": "#/components/schemas/PublicKey"
+          }
+        },
+        "required": [
+          "v",
+          "requestId",
+          "issuedAt",
+          "serverId",
+          "audience",
+          "operation",
+          "parameters",
+          "replyKey"
+        ],
+        "additionalProperties": false
+      },
+      "token.create.Response": {
+        "type": "object",
+        "properties": {
+          "v": {
+            "const": 1
+          },
+          "requestId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "serverId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "audience": {
+            "enum": [
+              "data",
+              "admin"
+            ]
+          },
+          "operation": {
+            "const": "token.create"
+          },
+          "status": {
+            "type": "integer"
+          },
+          "data": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "metadata": {
+                    "$ref": "#/components/schemas/TokenRecord"
+                  },
+                  "token": {
+                    "type": "string",
+                    "pattern": "^dv1_[A-Za-z0-9_-]{60}$"
+                  }
+                },
+                "required": [
+                  "metadata",
+                  "token"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "error": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Error"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "v",
+          "requestId",
+          "serverId",
+          "audience",
+          "operation",
+          "status",
+          "data",
+          "error"
+        ],
+        "additionalProperties": false
+      },
+      "token.list.Request": {
+        "type": "object",
+        "properties": {
+          "v": {
+            "const": 1
+          },
+          "requestId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "issuedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "serverId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "audience": {
+            "enum": [
+              "data",
+              "admin"
+            ]
+          },
+          "operation": {
+            "const": "token.list"
+          },
+          "parameters": {
+            "$ref": "#/components/schemas/PageParameters"
+          },
+          "replyKey": {
+            "$ref": "#/components/schemas/PublicKey"
+          }
+        },
+        "required": [
+          "v",
+          "requestId",
+          "issuedAt",
+          "serverId",
+          "audience",
+          "operation",
+          "parameters",
+          "replyKey"
+        ],
+        "additionalProperties": false
+      },
+      "token.list.Response": {
+        "type": "object",
+        "properties": {
+          "v": {
+            "const": 1
+          },
+          "requestId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "serverId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "audience": {
+            "enum": [
+              "data",
+              "admin"
+            ]
+          },
+          "operation": {
+            "const": "token.list"
+          },
+          "status": {
+            "type": "integer"
+          },
+          "data": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "items": {
+                    "type": "array",
+                    "items": {
+                      "$ref": "#/components/schemas/TokenRecord"
+                    }
+                  },
+                  "nextCursor": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  }
+                },
+                "required": [
+                  "items",
+                  "nextCursor"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "error": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Error"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "v",
+          "requestId",
+          "serverId",
+          "audience",
+          "operation",
+          "status",
+          "data",
+          "error"
+        ],
+        "additionalProperties": false
+      },
+      "token.revoke.Request": {
+        "type": "object",
+        "properties": {
+          "v": {
+            "const": 1
+          },
+          "requestId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "issuedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "serverId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "audience": {
+            "enum": [
+              "data",
+              "admin"
+            ]
+          },
+          "operation": {
+            "const": "token.revoke"
+          },
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "format": "uuid"
+              }
+            },
+            "required": [
+              "id"
+            ],
+            "additionalProperties": false
+          },
+          "replyKey": {
+            "$ref": "#/components/schemas/PublicKey"
+          }
+        },
+        "required": [
+          "v",
+          "requestId",
+          "issuedAt",
+          "serverId",
+          "audience",
+          "operation",
+          "parameters",
+          "replyKey"
+        ],
+        "additionalProperties": false
+      },
+      "token.revoke.Response": {
+        "type": "object",
+        "properties": {
+          "v": {
+            "const": 1
+          },
+          "requestId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "serverId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "audience": {
+            "enum": [
+              "data",
+              "admin"
+            ]
+          },
+          "operation": {
+            "const": "token.revoke"
+          },
+          "status": {
+            "type": "integer"
+          },
+          "data": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "revoked": {
+                    "const": true
+                  }
+                },
+                "required": [
+                  "revoked"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "error": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Error"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "v",
+          "requestId",
+          "serverId",
+          "audience",
+          "operation",
+          "status",
+          "data",
+          "error"
+        ],
+        "additionalProperties": false
+      },
+      "audit.list.Request": {
+        "type": "object",
+        "properties": {
+          "v": {
+            "const": 1
+          },
+          "requestId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "issuedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "serverId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "audience": {
+            "enum": [
+              "data",
+              "admin"
+            ]
+          },
+          "operation": {
+            "const": "audit.list"
+          },
+          "parameters": {
+            "$ref": "#/components/schemas/PageParameters"
+          },
+          "replyKey": {
+            "$ref": "#/components/schemas/PublicKey"
+          }
+        },
+        "required": [
+          "v",
+          "requestId",
+          "issuedAt",
+          "serverId",
+          "audience",
+          "operation",
+          "parameters",
+          "replyKey"
+        ],
+        "additionalProperties": false
+      },
+      "audit.list.Response": {
+        "type": "object",
+        "properties": {
+          "v": {
+            "const": 1
+          },
+          "requestId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "serverId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "audience": {
+            "enum": [
+              "data",
+              "admin"
+            ]
+          },
+          "operation": {
+            "const": "audit.list"
+          },
+          "status": {
+            "type": "integer"
+          },
+          "data": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "items": {
+                    "type": "array",
+                    "items": {
+                      "$ref": "#/components/schemas/Audit"
+                    }
+                  },
+                  "nextCursor": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  }
+                },
+                "required": [
+                  "items",
+                  "nextCursor"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "error": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Error"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "v",
+          "requestId",
+          "serverId",
+          "audience",
+          "operation",
+          "status",
+          "data",
+          "error"
+        ],
+        "additionalProperties": false
+      }
+    }
+  }
+}

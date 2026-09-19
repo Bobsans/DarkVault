@@ -1,0 +1,7 @@
+# Local go build and go test -c output
+/cli
+/cli.exe
+/darkvault
+/darkvault.exe
+*.test
+*.test.exe
