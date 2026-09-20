@@ -6,6 +6,27 @@ using DarkVault.Server;
 
 // This executable is test infrastructure only. It is never included in server packages.
 var root = Path.GetFullPath(args[0]);
+if (args.Skip(1).SequenceEqual(["--check"])) {
+    using var descriptor = JsonDocument.Parse(await File.ReadAllTextAsync(Path.Combine(root, ".local", "acceptance.json")));
+    var info = descriptor.RootElement;
+    using var pinned = X509CertificateLoader.LoadCertificateFromFile(info.GetProperty("ca").GetString()!);
+    using var http = new HttpClient(new HttpClientHandler {
+        AllowAutoRedirect = false,
+        ServerCertificateCustomValidationCallback = (_, cert, _, _) => cert?.Thumbprint == pinned.Thumbprint
+    });
+    using var client = new DarkVaultClient(info.GetProperty("url").GetString()!, (await File.ReadAllTextAsync(info.GetProperty("tokenFile").GetString()!)).Trim(), http);
+    var name = "csharp_" + Guid.NewGuid().ToString("N");
+    await client.AddBucketAsync(name);
+    var secret = await client.AddSecretAsync(name, "key", "native-秘密");
+    if ((await client.ReadSecretAsync(name, "key")).Value != "native-秘密") throw new InvalidOperationException("C# read mismatch.");
+    var updated = await client.UpdateSecretAsync(name, "key", "updated", secret.Revision);
+    if ((await client.ReadBucketAsync(name))["key"] != "updated") throw new InvalidOperationException("C# snapshot mismatch.");
+    if ((await client.ListSecretsAsync(name)).Items.Count != 1) throw new InvalidOperationException("C# list mismatch.");
+    await client.DeleteSecretAsync(name, "key", updated.Revision);
+    await client.DeleteBucketAsync(name, (await client.GetBucketAsync(name)).Revision);
+    Console.WriteLine("C# SDK verified against the published server.");
+    return;
+}
 var state = Path.Combine(root, ".local", "acceptance-" + Guid.NewGuid().ToString("N"));
 ServerCommands.SecureDirectory(state);
 using var rsa = RSA.Create(2048);
@@ -35,7 +56,9 @@ if (!File.Exists(fixturePath)) {
         token = "dv1_" + Wire.Base64(Enumerable.Range(0,45).Select(i => (byte)i).ToArray()),
         tokenHash = Wire.HashToken("dv1_" + Wire.Base64(Enumerable.Range(0,45).Select(i => (byte)i).ToArray())) }));
 }
+await File.WriteAllTextAsync(Path.Combine(root, ".local", "acceptance.json"), Wire.Serialize(new { url = "https://127.0.0.1:18866", ca, tokenFile }));
+// Seed the same temporary state for testing the published native server instead of this host.
+if (args.Skip(1).SequenceEqual(["--prepare"])) return;
 var app = VaultApplication.Build([], store, ring, state);
 app.Urls.Add("https://127.0.0.1:18866"); app.Configuration["Kestrel:Certificates:Default:Path"] = pfx;
-await File.WriteAllTextAsync(Path.Combine(root, ".local", "acceptance.json"), Wire.Serialize(new { url = "https://127.0.0.1:18866", ca, tokenFile }));
 await app.RunAsync();

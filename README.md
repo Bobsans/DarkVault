@@ -1,129 +1,201 @@
 # DarkVault
 
-Хранилище секретов с административным веб-интерфейсом, бакетами и токенами доступа.
-Сервер — ASP.NET Core и SQLite; клиенты — C#, Python, Go и TypeScript SDK, а также CLI на Go.
-Проект находится в разработке и ещё не опубликован.
+**Your secrets. Your server. One API for every application.**
 
-## Возможности
+[![CI](https://github.com/Bobsans/DarkVault/actions/workflows/release.yml/badge.svg)](https://github.com/Bobsans/DarkVault/actions/workflows/release.yml)
+[![Release](https://img.shields.io/github/v/release/Bobsans/DarkVault)](https://github.com/Bobsans/DarkVault/releases/latest)
+[![NuGet](https://img.shields.io/nuget/v/DarkVault.Client)](https://www.nuget.org/packages/DarkVault.Client)
+[![PyPI](https://img.shields.io/pypi/v/darkvault-client)](https://pypi.org/project/darkvault-client/)
+[![npm](https://img.shields.io/npm/v/%40darkvault%2Fclient)](https://www.npmjs.com/package/@darkvault/client)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-- Вход суперадминистратора, управление бакетами, секретами и токенами.
-- Токены длиной 64 символа: scopes, разрешённые бакеты, срок действия или бессрочный доступ, отзыв.
-- Чтение целого бакета для конфигурации приложения.
-- HTTPS и дополнительное JWE-шифрование запросов/ответов; AES-GCM для хранения.
-- Независимые ключи хранения и доступа, ротация, backup/restore и аудит.
+DarkVault is a self-hosted secrets manager for applications, scripts, and services.
+Organize credentials into buckets, give each application scoped access, and load
+its configuration through a native SDK or a single CLI command.
 
-## Сборка и запуск
+**Start with one bucket. Connect your first app. Keep control of where its secrets live.**
 
-Нужны .NET 10 SDK, Go 1.25+; для изменения веб-интерфейса — Node.js 22+ и pnpm 11.
-Собранный браузерный модуль хранится в репозитории, обычная сборка сервера не требует Node.
+## Why try DarkVault?
+
+- **A small deployment footprint.** One ASP.NET Core service and SQLite, with a web interface included.
+- **Use the language you already use.** C#, Python, Go, TypeScript, and a standalone CLI.
+- **Application-friendly configuration.** Read a whole bucket, load .NET configuration, or inject a child process's environment.
+- **Scoped credentials.** Limit tokens by operation and bucket, set expiration, and revoke access.
+- **Encryption in transit and at rest.** HTTPS plus JWE request/response encryption; AES-GCM for stored secret values.
+- **Explicit concurrency.** Revision checks prevent silent overwrites of another writer's changes.
+- **Operational tools included.** Backups, integrity verification, key rotation, and auditing.
+
+## Choose your client
+
+| Client | Install | User guide |
+| --- | --- | --- |
+| C# / .NET 10 | `dotnet add package DarkVault.Client` | [C# SDK](clients/csharp/DarkVault.Client/README.md) |
+| .NET configuration | `dotnet add package DarkVault.Extensions.Configuration` | [Configuration provider](clients/csharp/DarkVault.Extensions.Configuration/README.md) |
+| Python 3.11+ | `python -m pip install darkvault-client` | [Python SDK](clients/python/README.md) |
+| Go 1.25+ | `go get github.com/Bobsans/DarkVault/clients/go@latest` | [Go SDK](clients/go/README.md) |
+| TypeScript / Node.js 22+ | `npm install @darkvault/client` | [TypeScript SDK](clients/typescript/README.md) |
+| Command line | Download the CLI for your OS | [CLI guide](cli/README.md) |
+
+See [GitHub Releases](https://github.com/Bobsans/DarkVault/releases) for binaries and
+package archives. Registry badges reflect each registry independently; packages
+become installable after their first publication.
+
+## Get started
+
+### 1. Run your vault
+
+Download and extract the **server** archive for your OS and architecture from
+[Releases](https://github.com/Bobsans/DarkVault/releases). Server releases use
+Native AOT for Windows, Linux, and macOS (x64/ARM64); no .NET installation is needed.
+Keep the executable, SQLite library, and `wwwroot` files together.
+
+From the extracted directory, on Linux or macOS:
+
+```sh
+export DARKVAULT_DATA="$HOME/.darkvault-data"
+./DarkVault.Server bootstrap
+./DarkVault.Server serve
+```
+
+On Windows, in PowerShell:
 
 ```powershell
-dotnet build DarkVault.sln -c Release
 $env:DARKVAULT_DATA = 'D:/DarkVaultData'
-dotnet run --project server/DarkVault.Server -- bootstrap
-dotnet run --project server/DarkVault.Server -- serve
+./DarkVault.Server.exe bootstrap
+./DarkVault.Server.exe serve
 ```
 
-`bootstrap` запрашивает пароль локально без отображения на экране. Логин — `admin`.
-Перед сервером нужен HTTPS reverse proxy: [Caddyfile](deploy/Caddyfile) автоматически
-получает сертификат публичного домена. Подробности: [инструкция запуска](docs/operations.md).
+Use a dedicated, empty data directory owned by the service account. DarkVault
+restricts its permissions. `bootstrap` prompts privately for an administrator
+password of at least 15 characters; the login is `admin`.
 
-## C# / ASP.NET Core
+### 2. Put HTTPS in front
 
-```csharp
-using DarkVault.Client;
+The default backend listens on `127.0.0.1:8866`. Run a trusted HTTPS reverse proxy
+on the same host; do not expose the plaintext backend to the internet.
+For example, with Caddy and a domain pointing to your server:
 
-using var client = new DarkVaultClient("https://vault.example.com", token);
-var secrets = await client.ReadBucketAsync("app_qa", cancellationToken);
-builder.Configuration.AddInMemoryCollection(secrets);
+```caddyfile
+vault.example.com {
+    reverse_proxy 127.0.0.1:8866
+}
 ```
 
-Или с `DarkVault.Extensions.Configuration`:
+Allow ports 80 and 443 for the public domain. A [Caddy template](deploy/Caddyfile)
+and [systemd service template](deploy/darkvault.service) are included.
+`/health/ready` provides a readiness check.
 
-```csharp
-await builder.Configuration.AddFromDarkVaultBucketAsync(
-    "https://vault.example.com", token, "app_qa", cancellationToken);
-```
+### 3. Create a bucket and token
 
-Токен загружается из секретного источника приложения. Для чтения бакета нужны
-`bucket:read`, `secret:read`, `secret:list` и доступ к выбранному бакету.
-Пример приложения: [samples/AspNet](samples/AspNet).
+Open `https://vault.example.com`, sign in as `admin`, create a bucket such as
+`app_prod`, and add secrets. Issue an application token with access to that bucket.
+Reading the complete bucket requires `bucket:read`, `secret:read`, and `secret:list`.
 
-## Python
+Store that token in your deployment's protected secret source. Examples below read
+`DARKVAULT_TOKEN` explicitly; SDKs do not load environment variables automatically.
 
-```bash
-python -m pip install ./clients/python
-```
+### 4. Connect your application
+
+**Python**
 
 ```python
+import os
+
 from darkvault import DarkVaultClient
 
-with DarkVaultClient("https://vault.example.com", token) as vault:
-    secrets = vault.read_bucket("app_qa")
+with DarkVaultClient(
+    "https://vault.example.com",
+    os.environ["DARKVAULT_TOKEN"],
+) as vault:
+    settings = vault.read_bucket("app_prod")
+    database_url = settings["Database:Url"]
 ```
 
-Python 3.11+, все операции с бакетами и секретами, pagination, revisions и
-безопасные ошибки. [Документация Python SDK](clients/python/README.md).
+**TypeScript**
 
-## Go
+```typescript
+import { DarkVaultClient } from '@darkvault/client';
 
-Самостоятельный [Go SDK](clients/go/README.md) поддерживает бакеты, секреты,
-пагинацию и revisions. После публикации версии:
+const token = process.env.DARKVAULT_TOKEN;
+
+if (!token) {
+    throw new Error('DARKVAULT_TOKEN is required');
+}
+
+const vault = new DarkVaultClient('https://vault.example.com', token);
+const settings = await vault.readBucket('app_prod');
+```
+
+**ASP.NET Core configuration**
+
+```csharp
+using Microsoft.Extensions.Configuration;
+
+var builder = WebApplication.CreateBuilder(args);
+var token = Environment.GetEnvironmentVariable("DARKVAULT_TOKEN")
+    ?? throw new InvalidOperationException("DARKVAULT_TOKEN is required");
+
+await builder.Configuration.AddFromDarkVaultBucketAsync(
+    "https://vault.example.com",
+    token,
+    "app_prod"
+);
+
+var app = builder.Build();
+app.Run();
+```
+
+**CLI — no application code required**
 
 ```sh
-go get github.com/Bobsans/DarkVault/clients/go@v1.0.0
+darkvault config set server https://vault.example.com
+darkvault config set token
+darkvault exec \
+    --bucket app_prod \
+    --aspnet-keys \
+    -- dotnet MyApp.dll
 ```
 
-CLI использует тот же Go SDK, реализация протокола общая.
+The token prompt is hidden. `exec` loads secrets into the child process's environment;
+`--aspnet-keys` maps `:` to `__` for .NET configuration.
 
-## TypeScript
+## Security and operations
 
-[TypeScript SDK](clients/typescript/README.md) поставляется как npm-архив в GitHub Release:
+DarkVault is a server-side vault: the server decrypts secrets in memory, and the
+HTTPS proxy is trusted. It is **not a zero-knowledge system**. Protect the server,
+data directory, backups, and application tokens. Keep TLS validation enabled and
+avoid logging secret values, request bodies, or Authorization headers.
+
+Run one server process per data directory. To back up, stop the service and run
+`DarkVault.Server backup <new-directory>` using the same data directory and account
+(use `./DarkVault.Server` on Unix or `./DarkVault.Server.exe` on Windows).
+Both `vault.db` and `keyring.json` are required to restore. After restoring, run
+`verify`, then **`rotate-data` before the first write**, review token revocations
+made since the backup, and restart the service.
+
+## Documentation
+
+- Client guides: [C#](clients/csharp/DarkVault.Client/README.md), [configuration](clients/csharp/DarkVault.Extensions.Configuration/README.md), [Python](clients/python/README.md), [Go](clients/go/README.md), [TypeScript](clients/typescript/README.md), [CLI](cli/README.md).
+- [HTTP API schema](docs/openapi.json) and [ASP.NET sample](samples/AspNet).
+- Maintainer reference (currently in Russian): [operations](docs/operations.md), [protocol](docs/protocol.md), [verification](docs/verification.md), [versioning](docs/versioning.md), [publishing](docs/publishing.md).
+
+## Build from source
+
+With the .NET 10 SDK, run from the repository root:
 
 ```sh
-npm install ./darkvault-client-1.0.0.tgz
+dotnet publish server/DarkVault.Server/DarkVault.Server.csproj \
+    -c Release \
+    -o artifacts/server
 ```
 
-ESM для Node.js 22+ и браузерных сборщиков, декларации типов, `AbortSignal`, HTTPS/JWE.
+The browser bundle is included; changing frontend sources additionally requires
+Node.js 22+ and pnpm 11. Contributor checks run with `pwsh tools/verify.ps1`.
 
-## CLI
+## Give it a try
 
-```powershell
-New-Item -ItemType Directory -Force artifacts | Out-Null
-Push-Location cli
-go build -o ../artifacts/darkvault.exe .
-Pop-Location
-./artifacts/darkvault.exe config set server https://vault.example.com
-./artifacts/darkvault.exe config set token
-./artifacts/darkvault.exe bucket read app_qa
-```
+Move one application's configuration into a bucket and see how it fits your workflow.
+Found a rough edge or have an integration idea? [Open an issue](https://github.com/Bobsans/DarkVault/issues).
+If DarkVault helps you, **star the repository** so other developers can discover it.
 
-Команды: `bucket add|get|list|read|update|delete`,
-`secret add|get|list|update|set|delete`, `token info`, `exec`, `config`.
-`config set token` без значения запрашивает токен скрыто; поддерживается и
-`config set token <token>`. `config get server` показывает сохранённый сервер,
-`config list` — настройки с замаскированным токеном.
-
-Приоритет: флаги → окружение → конфиг. Дополнительные настройки:
-`config set timeout 10s`, `config set page-size 50`.
-Путь к файлу: `config path`; сброс отдельного значения: `config unset <key>`.
-Подробности хранения и всех переопределений: [конфигурация CLI](docs/operations.md#cli).
-
-## Проверка
-
-```powershell
-pwsh tools/verify.ps1
-```
-
-Сценарий проверяет сервер, SDK, CLI и UI, затем собирает локальные артефакты.
-[Подробности проверок](docs/verification.md).
-
-## Документация
-
-- [Спецификация](docs/specification.md)
-- [Единое версионирование и релизы](docs/versioning.md)
-- [HTTP/JWE-протокол](docs/protocol.md) и [OpenAPI](docs/openapi.json)
-- [Запуск, конфигурация, backup/restore](docs/operations.md)
-
-Сервер расшифровывает значения в памяти и доверяет своему HTTPS proxy; это не
-zero-knowledge хранилище. Ключи и база должны храниться в приватном каталоге сервиса.
+Released under the [MIT license](LICENSE).

@@ -11,7 +11,7 @@ public sealed class KeyRing {
     public string ServerId => state.ServerId;
     public KeyRing(string path, bool create) {
         this.path = Path.GetFullPath(path);
-        if (File.Exists(path)) state = Wire.Parse<Ring>(File.ReadAllText(path));
+        if (File.Exists(path)) state = ServerJson.Parse<Ring>(File.ReadAllText(path));
         else {
             if (!create) throw new InvalidOperationException("Keyring missing. Restore it before opening this database.");
             state = new(); RotateData(); RotateTransport();
@@ -28,7 +28,7 @@ public sealed class KeyRing {
             File.Move(tmp, path, true);
         } finally { if (File.Exists(tmp)) File.Delete(tmp); }
     }
-    private void Save() => SavePrivate(path, Wire.Serialize(state));
+    private void Save() => SavePrivate(path, ServerJson.Serialize(state));
     public void RotateData() {
         lock (gate) {
             var key = new DataKey(Guid.NewGuid().ToString(), Convert.ToBase64String(RandomNumberGenerator.GetBytes(32)), 0);
@@ -50,7 +50,7 @@ public sealed class KeyRing {
             var active = state.Transport[^1];
             using var ec = Load(active.PrivateKey);
             return new(1, state.ServerId, DateTimeOffset.UtcNow, active.Id, Wire.Export(ec), active.NotAfter,
-                new { maxBodyBytes = Wire.MaxBody, maxPlaintextBytes = Wire.MaxPlaintext });
+                new TransportLimits(Wire.MaxBody, Wire.MaxPlaintext));
         }
     }
     public string DecryptRequest(string compact) {
@@ -90,7 +90,7 @@ public sealed class KeyRing {
             } finally { CryptographicOperations.ZeroMemory(bytes); CryptographicOperations.ZeroMemory(plain); }
         }
     }
-    public static byte[] Aad(SecretMetadata m) => Encoding.UTF8.GetBytes(Wire.Serialize(new object[] { 1, m.Id, m.BucketId, m.Key, m.Revision }));
+    public static byte[] Aad(SecretMetadata m) => Encoding.UTF8.GetBytes(ServerJson.Serialize(new object[] { 1, m.Id, m.BucketId, m.Key, m.Revision }));
     public sealed class Ring {
         public string ServerId { get; set; } = Guid.NewGuid().ToString();
         public string ActiveData { get; set; } = "";

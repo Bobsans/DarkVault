@@ -7,11 +7,7 @@
 
 ```powershell
 pnpm --dir clients/typescript install --frozen-lockfile
-pnpm --dir clients/typescript build
-cd server/DarkVault.Server/Web
-pnpm install --frozen-lockfile
-pnpm build
-cd ../../..
+pnpm --dir admin install --frozen-lockfile
 dotnet build DarkVault.sln -c Release
 dotnet test DarkVault.sln -c Release
 dotnet publish server/DarkVault.Server/DarkVault.Server.csproj -c Release -o artifacts/server
@@ -21,10 +17,18 @@ cd cli
 go build -trimpath -o ../artifacts/cli/darkvault.exe .
 ```
 
-Node 22+ и pnpm 11; библиотеки JOSE включаются в локальный bundle. Готовый
-wwwroot/app.js сохранён в репозитории, серверная сборка не требует CDN или Node.
-Изменения Web/*.js требуют повторной сборки bundle. Команда генерации схем:
+Node 22+ и pnpm 11 нужны для сборки, но не для запуска готового сервера.
+`dotnet build` и `dotnet publish` собирают TypeScript SDK и SPA из `admin/`, затем
+включают HTML, CSS и JavaScript в выходной `wwwroot/`. Библиотеки JOSE входят
+в bundle; CDN и отдельный frontend-сервер не нужны. `admin/dist/` не коммитится.
+Команда генерации схем:
 `python tools/generate-contract.py`.
+
+Для публикации без установленного .NET используйте профиль `NativeAot`;
+команды и требования toolchain описаны в [verification.md](verification.md#native-aot).
+Нативный сервер запускается напрямую: `DarkVault.Server.exe serve` на Windows
+или `./DarkVault.Server serve` на Unix. Команды bootstrap, verify, backup и ротации
+те же; `wwwroot/` и нативная библиотека SQLite поставляются вместе с executable.
 
 ## Первичная настройка
 
@@ -60,8 +64,11 @@ Caddy получает и обновляет сертификат домена. 
 
 Шаблон systemd: [darkvault.service](../deploy/darkvault.service). Создайте отдельного
 пользователя и принадлежащий ему `/var/lib/darkvault`; bootstrap выполняется этим же
-пользователем. Серверу нужен .NET 10 ASP.NET Core Runtime. Статические файлы находятся
-рядом с опубликованным DLL, процесс может запускаться из другого cwd.
+пользователем. Релизный сервер скомпилирован Native AOT и не требует установки .NET.
+Сохраните executable, нативную библиотеку SQLite и `wwwroot/` из архива вместе;
+процесс может запускаться из другого cwd. Команды с `dotnet ...dll` в этом документе
+относятся к обычной managed-сборке из исходников; для релиза запускайте
+`./DarkVault.Server` (Windows: `./DarkVault.Server.exe`) с теми же аргументами.
 
 ## Бакет в C# / ASP.NET
 

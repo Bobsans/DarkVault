@@ -34,6 +34,19 @@ public sealed class ProtocolFixtureTests {
         Assert.Catch(() => Wire.Decrypt(body, key, "test", "darkvault-request+jwe"));
     }
     [Test]
+    public void CompactJweRemainsCompatibleWithTheJoseJwtCodec() {
+        using var key = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+        const string plaintext = "{\"value\":\"秘密\\nvalue\"}";
+        var compact = Wire.Encrypt(plaintext, Wire.Export(key), "test", "darkvault-response+jwe");
+        Assert.That(Jose.JWT.Decode(compact, key, Jose.JweAlgorithm.ECDH_ES, Jose.JweEncryption.A256GCM), Is.EqualTo(plaintext));
+        var reference = Jose.JWT.Encode(plaintext, key, Jose.JweAlgorithm.ECDH_ES, Jose.JweEncryption.A256GCM,
+            extraHeaders: new Dictionary<string, object> { ["kid"] = "test", ["typ"] = "darkvault-response+jwe", ["cty"] = "application/json" });
+        Assert.That(Wire.Decrypt(reference, key, "test", "darkvault-response+jwe"), Is.EqualTo(plaintext));
+        var parts = compact.Split('.');
+        parts[0] = Wire.Base64(System.Text.Encoding.UTF8.GetBytes(System.Text.Encoding.UTF8.GetString(Wire.Unbase64(parts[0])).Replace("test", "changed")));
+        Assert.Catch(() => Wire.Decrypt(string.Join('.', parts), key, "changed", "darkvault-response+jwe"));
+    }
+    [Test]
     public void JsonRejectsDuplicateUnknownAndIncorrectlyCasedFields() {
         Assert.Throws<FormatException>(() => Wire.ValidateJson("{\"a\":1,\"a\":2}"));
         Assert.Throws<JsonException>(() => Wire.Parse<PublicKey>("{\"kty\":\"EC\",\"crv\":\"P-256\",\"x\":\"\",\"y\":\"\",\"d\":\"private\"}"));

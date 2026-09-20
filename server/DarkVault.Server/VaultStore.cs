@@ -39,10 +39,10 @@ public sealed class VaultStore : IDisposable {
     }
     private void Execute(string sql, params object?[] values) { using var cmd = Command(sql, values); cmd.ExecuteNonQuery(); }
     private object? Scalar(string sql, params object?[] values) { using var cmd = Command(sql, values); return cmd.ExecuteScalar(); }
-    private T? One<T>(string sql, params object?[] values) => Scalar(sql, values) is string json ? Wire.Parse<T>(json) : default;
+    private T? One<T>(string sql, params object?[] values) => Scalar(sql, values) is string json ? ServerJson.Parse<T>(json) : default;
     private List<T> Many<T>(string sql, params object?[] values) {
         using var cmd = Command(sql, values); using var reader = cmd.ExecuteReader(); var list = new List<T>();
-        while (reader.Read()) list.Add(Wire.Parse<T>(reader.GetString(0))); return list;
+        while (reader.Read()) list.Add(ServerJson.Parse<T>(reader.GetString(0))); return list;
     }
     private long Revision() {
         var value = long.Parse((string)Scalar("SELECT json FROM settings WHERE id='revision'")!, CultureInfo.InvariantCulture) + 1;
@@ -57,7 +57,7 @@ public sealed class VaultStore : IDisposable {
             if (old is not null && !reset) throw new VaultFault(409, "already_initialized");
             var admin = new Admin(old?.Id ?? Guid.NewGuid().ToString(), "", Guid.NewGuid().ToString());
             admin = admin with { Hash = new PasswordHasher<Admin>().HashPassword(admin, password) };
-            Execute("INSERT OR REPLACE INTO settings VALUES ('admin',$p0)", Wire.Serialize(admin));
+            Execute("INSERT OR REPLACE INTO settings VALUES ('admin',$p0)", ServerJson.Serialize(admin));
         }
     }
     public Admin? Login(string password) {
@@ -76,7 +76,7 @@ public sealed class VaultStore : IDisposable {
             return new(record.Info.Id, false, record.Info);
         }
     }
-    private void SaveToken(TokenRecord token) => Execute("UPDATE tokens SET json=$p0 WHERE id=$p1", Wire.Serialize(token), token.Info.Id);
+    private void SaveToken(TokenRecord token) => Execute("UPDATE tokens SET json=$p0 WHERE id=$p1", ServerJson.Serialize(token), token.Info.Id);
     public void Reserve(Principal principal, VaultRequest request) {
         lock (gate) {
             Execute("DELETE FROM replay WHERE expires < $p0", DateTimeOffset.UtcNow.ToUnixTimeSeconds());
@@ -111,7 +111,7 @@ public sealed class VaultStore : IDisposable {
     private void Audit(string principal, string operation, string requestId, string result, string? bucketId = null, string? secretId = null) {
         var now = DateTimeOffset.UtcNow;
         Execute("DELETE FROM audit WHERE time < $p0", now.AddDays(-90).ToString("O"));
-        Execute("INSERT INTO audit(time,json) VALUES ($p0,$p1)", now.ToString("O"), Wire.Serialize(new { time = now, principal, operation, bucketId, secretId, requestId, result }));
+        Execute("INSERT INTO audit(time,json) VALUES ($p0,$p1)", now.ToString("O"), ServerJson.Serialize(new AuditEntry(now, principal, operation, bucketId, secretId, requestId, result)));
     }
     public void RecordFailure(string principal, string operation, string result) {
         lock (gate) Audit(principal, operation, Guid.NewGuid().ToString(), result);
@@ -170,7 +170,7 @@ public sealed class VaultStore : IDisposable {
             if (Scalar("SELECT id FROM buckets WHERE name=$p0", name) is not null) throw new VaultFault(409, "already_exists");
             var now = DateTimeOffset.UtcNow;
             var b = new Bucket(Guid.NewGuid().ToString(), name, Text(args, "description", 1024, true), Revision(), now, now);
-            Execute("INSERT INTO buckets VALUES ($p0,$p1,$p2)", b.Id, b.Name, Wire.Serialize(b));
+            Execute("INSERT INTO buckets VALUES ($p0,$p1,$p2)", b.Id, b.Name, ServerJson.Serialize(b));
             if (!p.IsAdmin && !p.Token!.AllBuckets) {
                 var token = One<TokenRecord>("SELECT json FROM tokens WHERE id=$p0", p.Id)!;
                 SaveToken(token with { Info = token.Info with { BucketIds = [.. token.Info.BucketIds, b.Id], CreatableBucketNames = token.Info.CreatableBucketNames.Where(n => n != name).ToArray() } });
@@ -196,7 +196,7 @@ public sealed class VaultStore : IDisposable {
             var recursive = Boolean(args, "recursive");
             if (recursive) Require(p, "secret:delete");
             if (!recursive && (long)Scalar("SELECT count(*) FROM entries WHERE bucket=$p0", bucket.Id)! > 0) throw new VaultFault(409, "bucket_not_empty");
-            Execute("DELETE FROM buckets WHERE id=$p0", bucket.Id); Revision(); return new { deleted = true };
+            Execute("DELETE FROM buckets WHERE id=$p0", bucket.Id); Revision(); return new DeleteResult(true);
         }
         if (op == "secret.list") {
             Fields(args, "bucket", "cursor", "limit"); Require(p, "secret:list");
@@ -214,7 +214,7 @@ public sealed class VaultStore : IDisposable {
             Fields(args, "bucket", "key", "expectedRevision"); Require(p, "secret:delete");
             if (old is null) throw new VaultFault(404, "not_found"); Match(Expected(args), old.Metadata.Revision);
             Execute("DELETE FROM entries WHERE id=$p0", old.Metadata.Id);
-            SaveBucket(bucket with { Revision = Revision(), UpdatedAt = DateTimeOffset.UtcNow }); return new { deleted = true };
+            SaveBucket(bucket with { Revision = Revision(), UpdatedAt = DateTimeOffset.UtcNow }); return new DeleteResult(true);
         }
         if (op is not ("secret.create" or "secret.update" or "secret.set")) throw new VaultFault(400, "unknown_operation");
         Fields(args, op == "secret.create" ? ["bucket", "key", "value"] : ["bucket", "key", "value", "expectedRevision"]);
@@ -226,7 +226,7 @@ public sealed class VaultStore : IDisposable {
         var value = input.GetString()!;
         if (Encoding.UTF8.GetByteCount(value) > 65536) throw new VaultFault(413, "payload_too_large");
         var values = Values(bucket.Id); values[key] = value;
-        if (values.Count > 4096 || Encoding.UTF8.GetByteCount(Wire.Serialize(values)) > 1024 * 1024) throw new VaultFault(413, "payload_too_large");
+        if (values.Count > 4096 || Encoding.UTF8.GetByteCount(ServerJson.Serialize(values)) > 1024 * 1024) throw new VaultFault(413, "payload_too_large");
         var time = DateTimeOffset.UtcNow;
         var meta = new SecretMetadata(old?.Metadata.Id ?? Guid.NewGuid().ToString(), bucket.Id, key, Revision(), old?.Metadata.CreatedAt ?? time, time);
         SaveSecret(meta, value);
@@ -237,14 +237,14 @@ public sealed class VaultStore : IDisposable {
             var secret = new StoredSecret(meta, ring.Encrypt(value, meta));
             try {
                 Execute("INSERT INTO entries VALUES ($p0,$p1,$p2,$p3,$p4,$p5) ON CONFLICT(id) DO UPDATE SET json=$p3,keyid=$p4,nonce=$p5",
-                    meta.Id, meta.BucketId, meta.Key, Wire.Serialize(secret), secret.Value.KeyId, secret.Value.Nonce);
+                    meta.Id, meta.BucketId, meta.Key, ServerJson.Serialize(secret), secret.Value.KeyId, secret.Value.Nonce);
                 return;
             } catch (SqliteException ex) when (ex.SqliteErrorCode == 19 &&
                 (long)Scalar("SELECT count(*) FROM entries WHERE keyid=$p0 AND nonce=$p1", secret.Value.KeyId, secret.Value.Nonce)! > 0) { }
         }
         throw new CryptographicException("Unable to allocate a unique nonce.");
     }
-    private void SaveBucket(Bucket b) => Execute("UPDATE buckets SET json=$p0 WHERE id=$p1", Wire.Serialize(b), b.Id);
+    private void SaveBucket(Bucket b) => Execute("UPDATE buckets SET json=$p0 WHERE id=$p1", ServerJson.Serialize(b), b.Id);
     private Dictionary<string, string?> Values(string bucket) => Many<StoredSecret>("SELECT json FROM entries WHERE bucket=$p0", bucket)
         .ToDictionary(s => s.Metadata.Key, s => (string?)ring.Decrypt(s.Value, s.Metadata), StringComparer.Ordinal);
     private object AdminCommand(Principal p, string op, JsonElement args) {
@@ -271,14 +271,14 @@ public sealed class VaultStore : IDisposable {
             var token = Wire.NewToken();
             var info = new TokenInfo(Guid.NewGuid().ToString(), name, scopes, buckets, all, names, expiry);
             var record = new TokenRecord(info, DateTimeOffset.UtcNow, null, null);
-            Execute("INSERT INTO tokens VALUES ($p0,$p1,$p2)", info.Id, Wire.HashToken(token), Wire.Serialize(record));
-            return new { metadata = record, token };
+            Execute("INSERT INTO tokens VALUES ($p0,$p1,$p2)", info.Id, Wire.HashToken(token), ServerJson.Serialize(record));
+            return new TokenCreated(record, token);
         }
         if (op == "token.list") { Fields(args, "cursor", "limit"); return Page(Many<TokenRecord>("SELECT json FROM tokens"), t => t.Info.Id, args); }
         if (op == "token.revoke") {
             Fields(args, "id"); var id = Text(args, "id");
             var token = One<TokenRecord>("SELECT json FROM tokens WHERE id=$p0", id) ?? throw new VaultFault(404, "not_found");
-            SaveToken(token with { RevokedAt = token.RevokedAt ?? DateTimeOffset.UtcNow }); return new { revoked = true };
+            SaveToken(token with { RevokedAt = token.RevokedAt ?? DateTimeOffset.UtcNow }); return new RevokeResult(true);
         }
         if (op == "audit.list") {
             Fields(args, "cursor", "limit"); var (cursor, limit) = Paging(args);
@@ -286,8 +286,8 @@ public sealed class VaultStore : IDisposable {
             if (!long.TryParse(cursor, out var after)) throw new VaultFault(400, "invalid_cursor");
             using var cmd = Command("SELECT id,json FROM audit WHERE id > $p0 ORDER BY id LIMIT $p1", after, limit + 1);
             using var r = cmd.ExecuteReader(); var items = new List<JsonElement>(); var ids = new List<long>();
-            while (r.Read()) { ids.Add(r.GetInt64(0)); items.Add(JsonSerializer.Deserialize<JsonElement>(r.GetString(1))); }
-            return new { items = items.Take(limit), nextCursor = ids.Count > limit ? Wire.Base64(Encoding.UTF8.GetBytes(ids[limit - 1].ToString(CultureInfo.InvariantCulture))) : null };
+            while (r.Read()) { ids.Add(r.GetInt64(0)); items.Add(ServerJson.Parse<JsonElement>(r.GetString(1))); }
+            return new Page<JsonElement>(items.Take(limit).ToArray(), ids.Count > limit ? Wire.Base64(Encoding.UTF8.GetBytes(ids[limit - 1].ToString(CultureInfo.InvariantCulture))) : null);
         }
         throw new VaultFault(400, "unknown_operation");
     }

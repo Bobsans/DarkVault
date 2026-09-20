@@ -36,6 +36,19 @@ public sealed class HttpTests {
         await app.StartAsync(); var url = app.Urls.Single();
         using var http = new HttpClient(new HttpClientHandler { AllowAutoRedirect = false, ServerCertificateCustomValidationCallback = (_, c, _, _) => c?.Thumbprint == cert.Thumbprint });
         try {
+            foreach (var path in new[] { "/", "/index.html", "/app.js", "/style.css" }) {
+                using var asset = await http.GetAsync(url + path);
+                Assert.That(asset.StatusCode, Is.EqualTo(HttpStatusCode.OK), path);
+                Assert.That(asset.Headers.CacheControl?.NoStore, Is.True, path);
+                Assert.That(asset.Headers.Contains("Content-Security-Policy"), Is.True, path);
+            }
+            var html = await http.GetStringAsync(url + "/");
+            Assert.That(html, Does.Contain("id=\"login-form\"").And.Contain("src=\"/app.js\""));
+            Assert.That(html, Does.Not.Contain("@page"));
+            foreach (var path in new[] { "/api/v1/missing", "/admin/api/v1/missing", "/missing.js", "/protocol.js" }) {
+                using var missing = await http.GetAsync(url + path);
+                Assert.That(missing.StatusCode, Is.EqualTo(HttpStatusCode.NotFound), path);
+            }
             using var client = new DarkVaultClient(url, token, http);
             var secret = await client.AddSecretAsync("qa", "ConnectionStrings:Main", "秘密\nvalue");
             Assert.That((await client.ReadBucketAsync("qa"))["ConnectionStrings:Main"], Is.EqualTo("秘密\nvalue"));

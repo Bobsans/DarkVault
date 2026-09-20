@@ -2,6 +2,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using System.Text.Json.Serialization.Metadata;
 using Jose;
 
 namespace DarkVault.Client;
@@ -15,13 +16,18 @@ public static class Wire {
         UnmappedMemberHandling = JsonUnmappedMemberHandling.Disallow,
         RespectRequiredConstructorParameters = true,
         RespectNullableAnnotations = true,
+        TypeInfoResolver = JsonSerializer.IsReflectionEnabledByDefault
+            ? JsonTypeInfoResolver.Combine(WireJsonContext.Default, new DefaultJsonTypeInfoResolver())
+            : WireJsonContext.Default,
         Converters = { new UtcDateConverter() }
     };
     public static readonly JsonSerializerOptions ResponseJson = new(Json) { UnmappedMemberHandling = JsonUnmappedMemberHandling.Skip };
-    public static string Serialize<T>(T value) => JsonSerializer.Serialize(value, Json);
+    public static JsonTypeInfo<T> TypeInfo<T>(JsonSerializerOptions? options = null) => (JsonTypeInfo<T>)(options ?? Json).GetTypeInfo(typeof(T));
+    public static string Serialize<T>(T value) => JsonSerializer.Serialize(value, TypeInfo<T>());
+    public static JsonElement ToElement(object value) => JsonSerializer.SerializeToElement(value, Json.GetTypeInfo(value.GetType()));
     public static T Parse<T>(string json) {
         ValidateJson(json);
-        return JsonSerializer.Deserialize<T>(json, Json) ?? throw new FormatException("Missing JSON value.");
+        return JsonSerializer.Deserialize(json, TypeInfo<T>()) ?? throw new FormatException("Missing JSON value.");
     }
     public static void ValidateJson(string json) {
         if (Encoding.UTF8.GetByteCount(json) > MaxPlaintext) throw new InvalidDataException("Payload too large.");
@@ -62,10 +68,18 @@ public static class Wire {
     public static string Encrypt(string json, PublicKey key, string kid, string type) {
         ValidateJson(json);
         using var ec = Import(key);
-        var result = JWT.Encode(json, ec, JweAlgorithm.ECDH_ES, JweEncryption.A256GCM,
-            extraHeaders: new Dictionary<string, object> { ["kid"] = kid, ["typ"] = type, ["cty"] = "application/json" });
-        if (result.Length > MaxBody) throw new FormatException("Payload too large.");
-        return result;
+        using var agreement = ECDiffieHellman.Create(ec.ExportParameters(false));
+        // Use the library's ECDH-ES and AES-GCM directly, without its reflection-based JWT mapper.
+        var header = new Dictionary<string, object> { ["alg"] = "ECDH-ES", ["enc"] = "A256GCM", ["kid"] = kid, ["typ"] = type, ["cty"] = "application/json" };
+        var cek = new EcdhKeyManagementUnix(true).WrapNewKey(256, agreement, header)[0];
+        var plaintext = Encoding.UTF8.GetBytes(json);
+        try {
+            var encodedHeader = Base64(Encoding.UTF8.GetBytes(Serialize(header)));
+            var parts = new AesGcmEncryption(256).Encrypt(Encoding.ASCII.GetBytes(encodedHeader), plaintext, cek);
+            var result = string.Join('.', encodedHeader, "", Base64(parts[0]), Base64(parts[1]), Base64(parts[2]));
+            if (result.Length > MaxBody) throw new FormatException("Payload too large.");
+            return result;
+        } finally { CryptographicOperations.ZeroMemory(cek); CryptographicOperations.ZeroMemory(plaintext); }
     }
     public static string Header(string compact, string type) {
         if (compact.Length > MaxBody) throw new InvalidDataException("Payload too large.");
@@ -86,9 +100,19 @@ public static class Wire {
     }
     public static string Decrypt(string compact, ECDsa key, string kid, string type) {
         if (Header(compact, type) != kid) throw new FormatException("Unexpected key ID.");
-        var json = JWT.Decode(compact, key, JweAlgorithm.ECDH_ES, JweEncryption.A256GCM);
-        ValidateJson(json);
-        return json;
+        var parts = compact.Split('.');
+        using var document = JsonDocument.Parse(Unbase64(parts[0]));
+        var epk = document.RootElement.GetProperty("epk").EnumerateObject().ToDictionary(p => p.Name, p => (object)p.Value.GetString()!);
+        var header = new Dictionary<string, object> { ["enc"] = "A256GCM", ["epk"] = epk };
+        using var agreement = ECDiffieHellman.Create(key.ExportParameters(true));
+        var cek = new EcdhKeyManagementUnix(true).Unwrap([], agreement, 256, header);
+        byte[]? plaintext = null;
+        try {
+            plaintext = new AesGcmEncryption(256).Decrypt(Encoding.ASCII.GetBytes(parts[0]), cek, Unbase64(parts[2]), Unbase64(parts[3]), Unbase64(parts[4]));
+            var json = new UTF8Encoding(false, true).GetString(plaintext);
+            ValidateJson(json);
+            return json;
+        } finally { CryptographicOperations.ZeroMemory(cek); if (plaintext is not null) CryptographicOperations.ZeroMemory(plaintext); }
     }
     public static async Task<string> ReadBodyAsync(Stream stream, CancellationToken ct) {
         using var buffer = new MemoryStream();

@@ -77,7 +77,7 @@ public sealed class DarkVaultClient : IDisposable {
                 using var reply = ECDsa.Create(ECCurve.NamedCurves.nistP256);
                 var id = Guid.NewGuid().ToString();
                 var request = new VaultRequest(1, id, DateTimeOffset.UtcNow, current.ServerId, "data", operation,
-                    JsonSerializer.SerializeToElement(parameters, Wire.Json), Wire.Export(reply));
+                    Wire.ToElement(parameters), Wire.Export(reply));
                 var body = Wire.Encrypt(Wire.Serialize(request), current.PublicKey, current.Kid, "darkvault-request+jwe");
                 using var message = new HttpRequestMessage(HttpMethod.Post, new Uri(endpoint, "api/v1/execute"));
                 message.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
@@ -98,12 +98,12 @@ public sealed class DarkVaultClient : IDisposable {
                     throw new DarkVaultException(code, (int)result.StatusCode, id);
                 }
                 var plain = Wire.Decrypt(text, reply, id, "darkvault-response+jwe");
-                var envelope = JsonSerializer.Deserialize<VaultResponse>(plain, Wire.ResponseJson) ?? throw new FormatException();
+                var envelope = JsonSerializer.Deserialize(plain, Wire.TypeInfo<VaultResponse>(Wire.ResponseJson)) ?? throw new FormatException();
                 if (envelope.V != 1 || envelope.RequestId != id || envelope.ServerId != current.ServerId || envelope.Audience != "data" ||
                     envelope.Operation != operation || envelope.Status != (int)result.StatusCode) throw new DarkVaultException("invalid_response", 0, id);
                 if (envelope.Error is not null) throw new DarkVaultException(envelope.Error.Code, envelope.Status, id);
                 if (!result.IsSuccessStatusCode || envelope.Data is null) throw new DarkVaultException("invalid_response", 0, id);
-                return envelope.Data.Value.Deserialize<T>(Wire.ResponseJson) ?? throw new DarkVaultException("invalid_response", 0, id);
+                return envelope.Data.Value.Deserialize(Wire.TypeInfo<T>(Wire.ResponseJson)) ?? throw new DarkVaultException("invalid_response", 0, id);
             } catch (HttpRequestException) when (read && attempt < 2) {
                 await Task.Delay(200 * (attempt + 1) + Random.Shared.Next(100), ct);
             } catch (HttpRequestException) {
