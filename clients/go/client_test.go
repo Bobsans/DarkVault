@@ -1,4 +1,4 @@
-package client
+package darkvault
 
 import (
 	"context"
@@ -53,7 +53,7 @@ func TestConfiguredTimeoutCoversDiscoveryAndExecute(t *testing.T) {
 }
 
 func TestDotNetJWEFixture(t *testing.T) {
-	b, e := os.ReadFile("../../tests/fixtures/jwe.json")
+	b, e := os.ReadFile("testdata/jwe.json")
 	if e != nil {
 		t.Fatal(e)
 	}

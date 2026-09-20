@@ -1,7 +1,7 @@
 # DarkVault
 
 Хранилище секретов с административным веб-интерфейсом, бакетами и токенами доступа.
-Сервер — ASP.NET Core и SQLite; клиенты — C# SDK, Python SDK и CLI на Go.
+Сервер — ASP.NET Core и SQLite; клиенты — C#, Python, Go и TypeScript SDK, а также CLI на Go.
 Проект находится в разработке и ещё не опубликован.
 
 ## Возможности
@@ -65,6 +65,27 @@ with DarkVaultClient("https://vault.example.com", token) as vault:
 Python 3.11+, все операции с бакетами и секретами, pagination, revisions и
 безопасные ошибки. [Документация Python SDK](clients/python/README.md).
 
+## Go
+
+Самостоятельный [Go SDK](clients/go/README.md) поддерживает бакеты, секреты,
+пагинацию и revisions. После публикации версии:
+
+```sh
+go get github.com/Bobsans/DarkVault/clients/go@v1.0.0
+```
+
+CLI использует тот же Go SDK, реализация протокола общая.
+
+## TypeScript
+
+[TypeScript SDK](clients/typescript/README.md) поставляется как npm-архив в GitHub Release:
+
+```sh
+npm install ./darkvault-client-1.0.0.tgz
+```
+
+ESM для Node.js 22+ и браузерных сборщиков, декларации типов, `AbortSignal`, HTTPS/JWE.
+
 ## CLI
 
 ```powershell
@@ -100,6 +121,7 @@ pwsh tools/verify.ps1
 ## Документация
 
 - [Спецификация](docs/specification.md)
+- [Единое версионирование и релизы](docs/versioning.md)
 - [HTTP/JWE-протокол](docs/protocol.md) и [OpenAPI](docs/openapi.json)
 - [Запуск, конфигурация, backup/restore](docs/operations.md)
 

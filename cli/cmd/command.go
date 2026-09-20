@@ -30,7 +30,8 @@ func Execute() int {
 }
 func Command() *cobra.Command {
 	var configFile string
-	root := &cobra.Command{Use: "darkvault", Short: "Encrypted secrets and scoped buckets", SilenceUsage: true, SilenceErrors: true}
+	root := &cobra.Command{Use: "darkvault", Version: buildVersion(), Short: "Encrypted secrets and scoped buckets", SilenceUsage: true, SilenceErrors: true}
+	root.SetVersionTemplate("{{.Version}}\n")
 	root.PersistentFlags().String("server", "", "HTTPS server origin (overrides environment and config)")
 	root.PersistentFlags().String("token", "", "Access token (prefer --token-file or saved config for sensitive values)")
 	root.PersistentFlags().String("token-file", "", "Private token file (overrides environment and config)")

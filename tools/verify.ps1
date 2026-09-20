@@ -18,6 +18,12 @@ try {
     $newPythonEnvironment = !(Test-Path -LiteralPath $pythonExecutable)
     if ($newPythonEnvironment) { & $Python -m venv $pythonEnvironment }
     if (!$SkipInstall -or $newPythonEnvironment) { & $pythonExecutable -m pip install -e ./clients/python build }
+    Push-Location clients/typescript
+    try {
+        if (!$SkipInstall) { & $Pnpm install --frozen-lockfile }
+        & $Pnpm build
+        & $Node --test test/client.test.js
+    } finally { Pop-Location }
     Push-Location server/DarkVault.Server/Web
     try {
         if (!$SkipInstall) { & $Pnpm install --frozen-lockfile }
@@ -28,6 +34,13 @@ try {
     dotnet build DarkVault.sln -c Release --disable-build-servers -m:1 -warnaserror
     dotnet format whitespace DarkVault.sln --no-restore --verify-no-changes
     dotnet build tests/AcceptanceHost/AcceptanceHost.csproj -c Release --disable-build-servers -m:1 -warnaserror
+    if ((Get-FileHash tests/fixtures/jwe.json).Hash -ne (Get-FileHash clients/go/testdata/jwe.json).Hash) { throw 'Go SDK fixture differs from the shared protocol fixture.' }
+    Push-Location clients/go
+    try {
+        if (@(gofmt -l .).Count) { throw 'Run gofmt on the Go SDK before verification.' }
+        go vet ./...
+        go mod verify
+    } finally { Pop-Location }
     Push-Location cli
     try {
         if (@(gofmt -l .).Count) { throw 'Run gofmt before verification.' }
@@ -58,8 +71,15 @@ try {
     }
     if (!$ready) { throw 'Acceptance host did not become ready.' }
     $env:DARKVAULT_ACCEPTANCE = $descriptor
+    $previousCa = $env:NODE_EXTRA_CA_CERTS
+    try {
+        $env:NODE_EXTRA_CA_CERTS = (Get-Content -LiteralPath $descriptor -Raw | ConvertFrom-Json).ca
+        & $Node --test clients/typescript/test/client.test.js
+    } finally { $env:NODE_EXTRA_CA_CERTS = $previousCa }
+    Push-Location clients/go
+    try { go test -count=1 ./... } finally { Pop-Location }
     Push-Location cli
-    try { go test ./... } finally { Pop-Location }
+    try { go test -count=1 ./... } finally { Pop-Location }
     & $pythonExecutable -m build clients/python --outdir artifacts/python
     $pythonConsumer = Join-Path $artifacts 'python-consumer'
     $consumerExecutable = Join-Path $pythonConsumer $(if ($IsWindows) { 'Scripts/python.exe' } else { 'bin/python' })
@@ -73,7 +93,8 @@ try {
     dotnet publish server/DarkVault.Server/DarkVault.Server.csproj -c Release --no-restore -o artifacts/server
     dotnet pack clients/csharp/DarkVault.Client/DarkVault.Client.csproj -c Release --no-restore -o artifacts/packages
     dotnet pack clients/csharp/DarkVault.Extensions.Configuration/DarkVault.Extensions.Configuration.csproj -c Release --no-restore -o artifacts/packages
-    Write-Output 'Verification completed, including the Python package. Only temporary test state was used.'
+    & $Pnpm --dir clients/typescript pack --pack-destination (Join-Path $artifacts 'typescript')
+    Write-Output 'Verification completed, including SDK packages. Only temporary test state was used.'
 } finally {
     if ($hostProcess -and !$hostProcess.HasExited) { Stop-Process -Id $hostProcess.Id }
     if ($hostProcess -and (Test-Path -LiteralPath $descriptor) -and (Get-Item -LiteralPath $descriptor).LastWriteTimeUtc -ge $started) {

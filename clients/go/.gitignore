@@ -1,0 +1,3 @@
+# Compiled test binaries
+*.test
+*.test.exe

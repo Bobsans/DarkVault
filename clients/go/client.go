@@ -1,5 +1,5 @@
-// Package client implements the DarkVault HTTP v1 protocol.
-package client
+// Package darkvault implements the DarkVault HTTP v1 protocol.
+package darkvault
 
 import (
 	"bytes"
@@ -258,6 +258,17 @@ func Decrypt(body string, key *ecdsa.PrivateKey, kid, kind string) ([]byte, erro
 	return plain, ValidateJSON(plain)
 }
 func (c *Client) Execute(ctx context.Context, op string, parameters any) (json.RawMessage, error) {
+	if c.HTTP == nil {
+		return nil, errors.New("HTTP client is required")
+	}
+	if _, err := NormalizeServer(c.URL); err != nil {
+		return nil, err
+	}
+	if err := ValidateToken(c.Token); err != nil {
+		return nil, err
+	}
+	transport := *c.HTTP
+	transport.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
 	timeout := c.HTTP.Timeout
 	if timeout <= 0 || timeout > 30*time.Second {
 		timeout = 30 * time.Second
@@ -268,7 +279,7 @@ func (c *Client) Execute(ctx context.Context, op string, parameters any) (json.R
 	if e != nil {
 		return nil, e
 	}
-	r, e := c.HTTP.Do(discovery)
+	r, e := transport.Do(discovery)
 	if e != nil {
 		return nil, errors.New("server unavailable")
 	}
@@ -314,7 +325,7 @@ func (c *Client) Execute(ctx context.Context, op string, parameters any) (json.R
 	message.Header.Set("Authorization", "Bearer "+c.Token)
 	message.Header.Set("Content-Type", "application/jose")
 	message.Header.Set("Accept", "application/jose")
-	r, e = c.HTTP.Do(message)
+	r, e = transport.Do(message)
 	if e != nil {
 		return nil, errors.New("request outcome unknown; verify state before retrying")
 	}
@@ -342,19 +353,12 @@ func (c *Client) Execute(ctx context.Context, op string, parameters any) (json.R
 		response.Error.RequestID = id
 		return nil, response.Error
 	}
-	if r.StatusCode < 200 || r.StatusCode >= 300 || len(response.Data) == 0 {
+	if r.StatusCode < 200 || r.StatusCode >= 300 || len(response.Data) == 0 || bytes.Equal(response.Data, []byte("null")) {
 		return nil, fmt.Errorf("invalid response status: %d", r.StatusCode)
 	}
 	return response.Data, nil
 }
 func (c *Client) ReadBucket(ctx context.Context, bucket string) (map[string]string, error) {
-	b, e := c.Execute(ctx, "bucket.read", map[string]any{"bucket": bucket})
-	if e != nil {
-		return nil, e
-	}
-	var s struct {
-		Secrets map[string]string `json:"secrets"`
-	}
-	e = json.Unmarshal(b, &s)
-	return s.Secrets, e
+	snapshot, err := c.ReadBucketSnapshot(ctx, bucket)
+	return snapshot.Secrets, err
 }

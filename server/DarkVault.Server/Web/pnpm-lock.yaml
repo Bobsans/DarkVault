@@ -8,6 +8,9 @@ importers:
 
   .:
     dependencies:
+      '@darkvault/client':
+        specifier: link:../../../clients/typescript
+        version: link:../../../clients/typescript
       jose:
         specifier: 6.2.12
         version: 6.2.12

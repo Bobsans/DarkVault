@@ -11,7 +11,7 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/Bobsans/DarkVault/cli/client"
+	client "github.com/Bobsans/DarkVault/clients/go"
 )
 
 const MaxSize = 8192

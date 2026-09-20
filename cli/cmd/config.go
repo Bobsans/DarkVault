@@ -9,8 +9,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/Bobsans/DarkVault/cli/client"
 	"github.com/Bobsans/DarkVault/cli/config"
+	client "github.com/Bobsans/DarkVault/clients/go"
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 )

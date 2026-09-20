@@ -2,6 +2,7 @@
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework><ImplicitUsings>enable</ImplicitUsings><Nullable>enable</Nullable>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <RepositoryUrl>https://github.com/Bobsans/DarkVault</RepositoryUrl>
     <PackageReadmeFile>README.md</PackageReadmeFile>
     <Description>Load an encrypted DarkVault bucket into .NET configuration.</Description>
   </PropertyGroup>

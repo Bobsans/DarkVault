@@ -8,9 +8,15 @@ namespace DarkVault.Server;
 public static class ServerCommands {
     public static async Task<int> RunAsync(string[] args) {
         try {
+            if (args is ["--version"]) {
+                Console.WriteLine(typeof(ServerCommands).Assembly.GetCustomAttributes(typeof(System.Reflection.AssemblyInformationalVersionAttribute), false)
+                    .Cast<System.Reflection.AssemblyInformationalVersionAttribute>().Single().InformationalVersion);
+                return 0;
+            }
             if (args.Contains("--help")) {
                 Console.WriteLine("""
                     DarkVault
+                    --version prints the build version and commit without opening the data directory.
                     Commands: serve (default), bootstrap, reset-password, verify, rotate-data,
                       rotate-transport [--emergency], backup <new-directory>
                     DARKVAULT_DATA: private directory (default: ./data)

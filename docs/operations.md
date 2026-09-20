@@ -6,6 +6,8 @@
 ## Сборка
 
 ```powershell
+pnpm --dir clients/typescript install --frozen-lockfile
+pnpm --dir clients/typescript build
 cd server/DarkVault.Server/Web
 pnpm install --frozen-lockfile
 pnpm build

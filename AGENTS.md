@@ -1,7 +1,7 @@
 # DarkVault
 
 Хранилище секретов: ASP.NET Core и SQLite, административный веб-интерфейс,
-C# и Python SDK, CLI на Go. Основной solution — `DarkVault.sln`.
+C#, Python, Go и TypeScript SDK, CLI на Go. Основной solution — `DarkVault.sln`.
 
 ## Структура
 
@@ -16,6 +16,8 @@ C# и Python SDK, CLI на Go. Основной solution — `DarkVault.sln`.
 | `clients/csharp/DarkVault.Client.Tests/` | Независимые от сервера проверки C#-клиента, JSON и JWE |
 | `clients/csharp/DarkVault.Extensions.Configuration/` | Загрузка бакета в конфигурацию .NET |
 | `clients/python/` | Python SDK, упаковка и тесты |
+| `clients/go/` | Самостоятельный Go SDK, типизированный API и тесты; CLI использует этот модуль |
+| `clients/typescript/` | TypeScript SDK и общий JWE-модуль веб-интерфейса; сборка ESM и деклараций типов |
 | `cli/` | CLI на Go; тесты находятся рядом с кодом |
 | `tests/AcceptanceHost/` | Временный HTTPS-сервер для межъязыковых и браузерных проверок |
 | `tests/fixtures/` | Общие публичные тестовые данные протокола |
@@ -56,6 +58,7 @@ C# и Python SDK, CLI на Go. Основной solution — `DarkVault.sln`.
   Обновляй `docs/protocol.md` и генератор `tools/generate-contract.py`;
   `docs/openapi.json` пересоздавай генератором.
 - Не редактируй собранный `wwwroot/app.js` вручную. После изменения браузерного кода
+  сначала собирай SDK командой `pnpm --dir clients/typescript build`, затем
   пересобирай bundle из `server/DarkVault.Server/Web/` командой `pnpm build`.
 - Не выводи реальные секреты в чат, логи или аргументы команд. Не коммить токены,
   приватные ключи, сертификаты и базы. Публичный `tests/fixtures/jwe.json` — тестовые данные.
@@ -64,6 +67,10 @@ C# и Python SDK, CLI на Go. Основной solution — `DarkVault.sln`.
 - Тесты должны использовать временное состояние и очищать его, не затрагивая реальные установки.
 
 ## Проверки
+
+Версия релиза общая для сервера, CLI и всех SDK; источник — тег `vMAJOR.MINOR.PATCH`.
+Не обновляй версии в manifests вручную: они содержат маркеры разработки, а упаковка
+подставляет тег. Правила и проверка версий артефактов — `docs/versioning.md`.
 
 Команды выполняются из корня репозитория:
 
