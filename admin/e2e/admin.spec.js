@@ -17,7 +17,11 @@ test('Admin navigation, audit filters and encrypted CRUD work on desktop and mob
   await expect(page.locator('#workspace')).toBeVisible();
   await expect(page.locator('#value-dialog')).toBeVisible();
   await expect(page.locator('#value-text')).toHaveValue(/dvrc_/);
+  await expect(page.locator('#value-type-label')).toBeHidden();
+  await expect(page.locator('#save-value')).toBeHidden();
+  await expect(page.locator('#value-text')).toHaveAttribute('readonly', '');
   await page.locator('#close-value').click();
+  await expect(page.locator('#value-text')).toHaveValue('');
   await expect(page.locator('#audit-list tr').first()).toBeVisible();
   await expect(page).toHaveURL(/\/admin\/logs$/);
   const nav = page.getByRole('navigation', { name: 'Main navigation' });
@@ -25,7 +29,7 @@ test('Admin navigation, audit filters and encrypted CRUD work on desktop and mob
   await expect(page).toHaveURL(/\/admin\/buckets$/);
   const name = 'payments_production';
   for (const [bucket, description] of [[name, 'Production credentials for the payments platform.'], ['payments_staging', 'Isolated secrets for integration tests and previews.'], ['payments_workers', 'Background jobs, queues, and scheduled processing.']]) {
-    await page.getByRole('button', { name: '+ New bucket', exact: true }).click();
+    await page.getByRole('button', { name: 'New bucket', exact: true }).click();
     await page.locator('#bucket-form').getByLabel('Name', { exact: true }).fill(bucket);
     await page.locator('#bucket-form').getByLabel('Description', { exact: true }).fill(description);
     await page.getByRole('button', { name: 'Create bucket', exact: true }).click();
@@ -39,11 +43,16 @@ test('Admin navigation, audit filters and encrypted CRUD work on desktop and mob
   await expect(page.locator('#bucket-title')).toHaveText(name);
   await page.reload();
   await expect(page.locator('#bucket-title')).toHaveText(name);
+  const keyBox = await page.getByLabel('Key', { exact: true }).boundingBox();
+  const valueBox = await page.locator('#secret-form textarea').boundingBox();
+  expect(Math.abs(keyBox.y - valueBox.y)).toBeLessThan(2);
+  expect(Math.abs(keyBox.height - valueBox.height)).toBeLessThan(2);
   await page.getByLabel('Key', { exact: true }).fill('ConnectionStrings:Main');
   await page.locator('#secret-form').getByLabel('Value', { exact: true }).fill('browser-secret-秘密');
   await page.getByRole('button', { name: 'Add secret', exact: true }).click();
   await page.getByRole('button', { name: 'Show / edit', exact: true }).click();
   await expect(page.locator('#value-text')).toHaveValue('browser-secret-秘密');
+  await expect(page.getByLabel('Value type', { exact: true })).toBeVisible();
   await page.locator('#value-text').fill('updated');
   await page.getByRole('button', { name: 'Save change', exact: true }).click();
   await page.getByRole('button', { name: 'Show / edit', exact: true }).click();
@@ -99,13 +108,14 @@ test('Admin navigation, audit filters and encrypted CRUD work on desktop and mob
   await nav.getByRole('link', { name: 'Access tokens', exact: true }).click();
   await expect(page.locator('#config-output')).toBeEmpty();
   await expect(page).toHaveURL(/\/admin\/tokens$/);
-  await page.getByRole('button', { name: '+ New token', exact: true }).click();
+  await page.getByRole('button', { name: 'New token', exact: true }).click();
   await page.locator('#token-form').getByLabel('Name', { exact: true }).fill('Payments service');
   await page.getByRole('button', { name: 'Select bucket reader scopes' }).click();
   await page.locator('#token-buckets').getByLabel(name, { exact: true }).check();
   await page.getByRole('button', { name: 'Create token', exact: true }).click();
   await expect(page.locator('#value-text')).toHaveValue(/^dv1_[A-Za-z0-9_-]{60}$/);
-  await page.getByRole('button', { name: 'Close and clear', exact: true }).click();
+  await expect(page.locator('#value-type-label')).toBeHidden();
+  await page.getByRole('button', { name: 'Close', exact: true }).click();
   await expect(page.locator('#value-text')).toHaveValue('');
   const tokenRow = page.locator('#token-list article').filter({ hasText: 'Payments service' });
   page.once('dialog', dialog => dialog.accept()); await tokenRow.getByRole('button', { name: 'Revoke', exact: true }).click();
@@ -115,6 +125,17 @@ test('Admin navigation, audit filters and encrypted CRUD work on desktop and mob
   await nav.getByRole('link', { name: 'Activity logs', exact: true }).click();
   await expect(page).toHaveURL(/\/admin\/logs$/);
   await expect(nav.getByRole('link', { name: 'Activity logs', exact: true })).toHaveAttribute('aria-current', 'page');
+  const eventType = page.getByLabel('Event type', { exact: true });
+  await expect(eventType).toHaveCSS('appearance', 'base-select');
+  await eventType.click();
+  await page.screenshot({ path: 'test-results/admin-select.png' });
+  await page.getByRole('option', { name: 'Operations', exact: true }).click();
+  await expect(eventType).toHaveValue('operation');
+  await eventType.focus();
+  await page.keyboard.press('Space');
+  await page.keyboard.press('ArrowDown');
+  await page.keyboard.press('Enter');
+  await expect(eventType).toHaveValue('http');
   await page.getByLabel('Search logs', { exact: true }).fill(name);
   await page.getByLabel('Event type', { exact: true }).selectOption('operation');
   await page.getByRole('button', { name: 'Apply filters', exact: true }).click();
@@ -144,6 +165,10 @@ test('Admin navigation, audit filters and encrypted CRUD work on desktop and mob
 
   await nav.getByRole('link', { name: 'Settings', exact: true }).click();
   await expect(page).toHaveURL(/\/admin\/settings$/);
+  const settingsHeading = await page.getByRole('heading', { name: 'Security settings', exact: true }).boundingBox();
+  const passkeysHeading = await page.getByRole('heading', { name: 'Passkeys', exact: true }).boundingBox();
+  expect(passkeysHeading.y).toBeGreaterThan(settingsHeading.y + settingsHeading.height);
+  await page.screenshot({ path: 'test-results/admin-settings.png' });
   await page.getByLabel('Current password', { exact: true }).fill('acceptance-test-password-only');
   await page.getByLabel('New password', { exact: true }).fill('acceptance-test-password-updated');
   await page.getByRole('button', { name: 'Change password and sign out', exact: true }).click();

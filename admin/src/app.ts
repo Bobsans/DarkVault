@@ -74,6 +74,12 @@ function node<K extends keyof HTMLElementTagNameMap>(tag: K, text = '', cls?: st
 }
 function button(text: string, fn: () => unknown, cls?: string) { const b = node('button', text, cls); b.type = 'button'; action(b, 'click', fn); return b; }
 function link(text: string, href: string) { const a = node('a', text); a.href = href; a.dataset.route = ''; return a; }
+function icon(name: string) {
+    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    svg.classList.add('icon'); svg.setAttribute('aria-hidden', 'true'); svg.setAttribute('focusable', 'false');
+    const use = document.createElementNS(svg.namespaceURI, 'use'); use.setAttribute('href', '#icon-' + name); svg.append(use);
+    return svg;
+}
 function field(parent: HTMLElement, name: string, value: string, title: string) {
     const label = node('label', '', 'check'); const input = document.createElement('input'); input.type = 'checkbox'; input.name = name; input.value = value;
     label.append(input, document.createTextNode(title)); parent.append(label);
@@ -98,6 +104,7 @@ function showRecovery(codes: string[]) {
     if (!codes.length) return;
     editing = null; $('value-title').textContent = 'Save your recovery codes';
     $('value-help').textContent = 'Each code works once with your password to replace a lost passkey. Store offline. Shown only once.';
+    $('value-type-label').hidden = true;
     $('value-text').value = codes.join('\n'); $('value-text').readOnly = true; $('save-value').hidden = true; $('value-dialog').showModal();
 }
 async function session() {
@@ -168,8 +175,8 @@ function renderBuckets() {
     const query = $('bucket-search').value.toLowerCase();
     for (const b of buckets.filter(b => b.name.toLowerCase().includes(query) || b.description.toLowerCase().includes(query))) {
         const card = node('article', '', 'card'); const top = node('div', '', 'card-top');
-        const icon = node('span', '▦', 'bucket-icon'); icon.setAttribute('aria-hidden', 'true'); top.append(icon, node('span', 'Revision ' + b.revision, 'badge neutral'));
-        const footer = node('div', '', 'card-footer'); const open = link('Open bucket →', '/admin/buckets/' + encodeURIComponent(b.name)); open.setAttribute('aria-label', 'Open ' + b.name);
+        const mark = node('span', '', 'bucket-icon'); mark.append(icon('buckets')); top.append(mark, node('span', 'Revision ' + b.revision, 'badge neutral'));
+        const footer = node('div', '', 'card-footer'); const open = link('Open bucket ', '/admin/buckets/' + encodeURIComponent(b.name)); open.append(icon('right')); open.setAttribute('aria-label', 'Open ' + b.name);
         footer.append(node('small', 'Updated ' + new Date(b.updatedAt).toLocaleDateString()), open);
         card.append(top, node('h2', b.name), node('p', b.description || 'No description provided.'), footer); list.append(card);
     }
@@ -247,7 +254,8 @@ function auditRow(entry: AuditEntry, index: number) {
     for (const [label, value] of fields) { const item = node('div'); item.append(node('dt', label), node('dd', value || '—')); grid.append(item); }
     const raw = node('details'); raw.append(node('summary', 'Full event metadata'), node('pre', JSON.stringify(entry, null, 2)));
     detailsCell.append(grid, raw); detailsRow.append(detailsCell);
-    const expand = button('⌄', () => { detailsRow.hidden = !detailsRow.hidden; expand.setAttribute('aria-expanded', String(!detailsRow.hidden)); expand.textContent = detailsRow.hidden ? '⌄' : '⌃'; }, 'expand-button');
+    const expand = button('', () => { detailsRow.hidden = !detailsRow.hidden; expand.setAttribute('aria-expanded', String(!detailsRow.hidden)); }, 'expand-button');
+    expand.append(icon('chevron'));
     expand.setAttribute('aria-label', 'Event details: ' + entry.operation); expand.setAttribute('aria-controls', detailsRow.id); expand.setAttribute('aria-expanded', 'false');
     toggle.append(expand); row.append(event, actor, source, result, toggle); $('audit-list').append(row, detailsRow);
 }
