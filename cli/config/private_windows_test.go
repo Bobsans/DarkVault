@@ -20,8 +20,12 @@ func TestWindowsConfigurationHasPrivateDACL(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	expected := "D:P(A;;FA;;;" + user.User.Sid.String() + ")"
-	if descriptor.String() != expected {
+	expected, err := windows.SecurityDescriptorFromString("D:P(A;;FA;;;" + user.User.Sid.String() + ")")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Normalize both descriptors because Windows may render well-known SIDs as aliases.
+	if descriptor.String() != expected.String() {
 		t.Fatalf("unexpected configuration DACL: %s", descriptor.String())
 	}
 }
