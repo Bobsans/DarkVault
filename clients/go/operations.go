@@ -16,6 +16,7 @@ type Bucket struct {
 }
 
 type SecretMetadata struct {
+	Type      string    `json:"type"`
 	ID        string    `json:"id"`
 	BucketID  string    `json:"bucketId"`
 	Key       string    `json:"key"`
@@ -30,6 +31,7 @@ type Secret struct {
 }
 
 type BucketSnapshot struct {
+	Types    map[string]string `json:"types"`
 	BucketID string            `json:"bucketId"`
 	Revision int64             `json:"revision"`
 	Secrets  map[string]string `json:"secrets"`

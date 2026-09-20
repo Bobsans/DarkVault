@@ -9,6 +9,7 @@ Group=darkvault
 WorkingDirectory=/opt/darkvault
 Environment=DARKVAULT_DATA=/var/lib/darkvault
 Environment=ASPNETCORE_URLS=http://127.0.0.1:8866
+Environment=DARKVAULT_TRUSTED_PROXIES=127.0.0.1,::1
 ExecStart=/opt/darkvault/DarkVault.Server serve
 Restart=on-failure
 UMask=0077

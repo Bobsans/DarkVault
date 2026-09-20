@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -89,6 +90,39 @@ func TestLiveCLI(t *testing.T) {
 	bucket := run("bucket", "add", "go_live")
 	if bucket["name"] != "go_live" {
 		t.Fatal("wrong bucket")
+	}
+	input, err := os.CreateTemp(t.TempDir(), "typed-input")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer input.Close()
+	if _, err = input.WriteString("6379"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = input.Seek(0, 0); err != nil {
+		t.Fatal(err)
+	}
+	previousInput := os.Stdin
+	os.Stdin = input
+	defer func() { os.Stdin = previousInput }()
+	added := run("secret", "add", "go_live", "Redis:Port", "--type", "number", "--stdin")
+	if added["type"] != "number" {
+		t.Fatal("CLI lost secret type")
+	}
+	typed := run("bucket", "read", "go_live", "--format", "typed-json")
+	if typed["Redis:Port"] != float64(6379) {
+		t.Fatal("typed JSON lost number")
+	}
+	nested := run("bucket", "read", "go_live", "--format", "nested-json")
+	if nested["Redis"].(map[string]any)["Port"] != float64(6379) {
+		t.Fatal("nested JSON lost number")
+	}
+	if yaml := runText("bucket", "read", "go_live", "--format", "yaml"); !strings.Contains(yaml, `"Port": 6379`) {
+		t.Fatal("YAML lost number")
+	}
+	snapshot := run("bucket", "read", "go_live")
+	if snapshot["secrets"].(map[string]any)["Redis:Port"] != "6379" {
+		t.Fatal("string fallback changed")
 	}
 	run("bucket", "read", "interop")
 	run("token", "info")

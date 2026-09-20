@@ -145,3 +145,7 @@ the CLI uses a local module replacement for the shared Go SDK.
 [DarkVault overview](https://github.com/Bobsans/DarkVault#readme) ·
 [Go SDK](https://github.com/Bobsans/DarkVault/blob/main/clients/go/README.md) ·
 [Issues](https://github.com/Bobsans/DarkVault/issues)
+
+## Typed configuration
+
+Secret types are string, number, boolean, and null. String reads remain available; typed reads preserve scalar types. See [the configuration contract](https://github.com/Bobsans/DarkVault/blob/main/docs/configuration.md) for SDK methods, nested paths, JSON/YAML export, and string fallback rules.

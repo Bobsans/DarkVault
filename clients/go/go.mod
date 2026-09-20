@@ -1,4 +1,4 @@
-module github.com/Bobsans/DarkVault/clients/go
+module github.com/Bobsans/DarkVault/clients/go/v2
 
 go 1.25.0
 

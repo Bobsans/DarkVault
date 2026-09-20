@@ -1,6 +1,6 @@
 # DarkVault Go SDK
 
-[![Go Reference](https://pkg.go.dev/badge/github.com/Bobsans/DarkVault/clients/go.svg)](https://pkg.go.dev/github.com/Bobsans/DarkVault/clients/go)
+[![Go Reference](https://pkg.go.dev/badge/github.com/Bobsans/DarkVault/clients/go/v2.svg)](https://pkg.go.dev/github.com/Bobsans/DarkVault/clients/go/v2)
 [![Go](https://img.shields.io/badge/go-1.25%2B-00ADD8)](https://go.dev/)
 [![CI](https://github.com/Bobsans/DarkVault/actions/workflows/release.yml/badge.svg)](https://github.com/Bobsans/DarkVault/actions/workflows/release.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](https://github.com/Bobsans/DarkVault/blob/main/LICENSE)
@@ -13,7 +13,7 @@ The module is independent of the CLI, Cobra, and the DarkVault server project.
 Requires Go 1.25+:
 
 ```sh
-go get github.com/Bobsans/DarkVault/clients/go@latest
+go get github.com/Bobsans/DarkVault/clients/go/v2@latest
 ```
 
 Pin a published version for reproducible builds. Releases use module tags such as
@@ -30,7 +30,7 @@ import (
 	"os"
 	"time"
 
-	darkvault "github.com/Bobsans/DarkVault/clients/go"
+	darkvault "github.com/Bobsans/DarkVault/clients/go/v2"
 )
 
 func main() {
@@ -226,7 +226,11 @@ cleanup; the SDK has no `Close` method.
 ## Local checkout
 
 Before a module version is published, a consuming Go module can use a local
-`replace github.com/Bobsans/DarkVault/clients/go => /path/to/DarkVault/clients/go`.
+`replace github.com/Bobsans/DarkVault/clients/go/v2 => /path/to/DarkVault/clients/go`.
 Published module versions do not need that replacement.
 
 [DarkVault and server setup](https://github.com/Bobsans/DarkVault#readme) · [API schema](https://github.com/Bobsans/DarkVault/blob/main/docs/openapi.json) · [Issues](https://github.com/Bobsans/DarkVault/issues) · [MIT license](https://github.com/Bobsans/DarkVault/blob/main/LICENSE)
+
+## Typed configuration
+
+Secret types are string, number, boolean, and null. String reads remain available; typed reads preserve scalar types. See [the configuration contract](https://github.com/Bobsans/DarkVault/blob/main/docs/configuration.md) for SDK methods, nested paths, JSON/YAML export, and string fallback rules.

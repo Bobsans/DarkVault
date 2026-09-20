@@ -3,6 +3,10 @@
 Сервер работает одним процессом с SQLite. Новый процесс не запускается, если
 каталог данных уже занят.
 
+Обязательная MFA, встроенные блокировки, лимиты, доверенные прокси и защита keyring
+описаны в [security.md](security.md). Защита приложения не требует Fail2ban или
+конкретного reverse proxy; конфигурацию инфраструктуры выбирает владелец.
+
 ## Сборка
 
 ```powershell
@@ -54,6 +58,8 @@ CLI bootstrap требует локальный интерактивный те�
 [Caddyfile](../deploy/Caddyfile), задав `DARKVAULT_DOMAIN=vault.example.com`.
 Caddy получает и обновляет сертификат домена. DarkVault слушает только
 `http://127.0.0.1:8866`; внешний plaintext HTTP запрещён приложением.
+Для этой схемы явно задайте серверу `DARKVAULT_TRUSTED_PROXIES=127.0.0.1,::1`:
+по умолчанию forwarded-заголовки не принимаются. При прямом HTTPS переменная не нужна.
 Проверка сертификатов SDK/CLI всегда включена, собственные CA-файлы не нужны.
 Условия получения сертификата: [документация Automatic HTTPS](https://caddyserver.com/docs/automatic-https).
 
@@ -168,6 +174,8 @@ darkvault --server https://vault.example.com exec --bucket app_qa --aspnet-keys 
 Остановите сервис, затем `dotnet DarkVault.Server.dll backup <new-directory>`.
 Команда использует SQLite backup API и копирует keyring. Защитите обе части:
 доступ к keyring и БД вместе позволяет прочитать секреты. Не публикуйте архивы.
+Для зашифрованного keyring дополнительно требуется отдельный внешний ключ из
+`DARKVAULT_KEYRING_KEY_FILE`; backup его не копирует. См. [security.md](security.md).
 
 Для restore: остановить сервис, сохранить текущий каталог отдельно, восстановить
 `vault.db` и `keyring.json` в новый приватный `DARKVAULT_DATA`, выполнить `verify`,

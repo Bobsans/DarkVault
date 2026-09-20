@@ -13,6 +13,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/Bobsans/DarkVault/cli/config"
+	"github.com/Bobsans/DarkVault/clients/go/v2"
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 )
@@ -59,7 +60,7 @@ func Command() *cobra.Command {
 			kind, verb := kind, verb
 			var revision int64
 			var recursive, stdin bool
-			var description, cursor, format string
+			var description, cursor, format, secretType string
 			var limit int
 			use := verb
 			count := 0
@@ -83,9 +84,15 @@ func Command() *cobra.Command {
 			cmd.Flags().StringVar(&cursor, "cursor", "", "Opaque listing cursor")
 			cmd.Flags().IntVar(&limit, "limit", 100, "Page size (overrides config page-size)")
 			cmd.Flags().StringVar(&format, "format", "json", "Output format (json)")
+			if kind == "secret" && (verb == "add" || verb == "update" || verb == "set") {
+				cmd.Flags().StringVar(&secretType, "type", "string", "Secret type: string, number, boolean, null")
+			}
+			if kind == "bucket" && verb == "read" {
+				cmd.Flags().Lookup("format").Usage = "Output format: json (snapshot), typed-json, nested-json, yaml"
+			}
 			cmd.RunE = func(cmd *cobra.Command, args []string) error {
-				if format != "json" {
-					return errors.New("only json format is supported")
+				if format != "json" && !(kind == "bucket" && verb == "read" && (format == "typed-json" || format == "nested-json" || format == "yaml")) {
+					return errors.New("unsupported output format")
 				}
 				filename, e := path()
 				if e != nil {
@@ -154,10 +161,42 @@ func Command() *cobra.Command {
 						return errors.New("value must be UTF-8 and at most 64 KiB")
 					}
 					p["value"] = string(b)
+					if _, e = darkvault.ParseScalar(string(b), secretType); e != nil {
+						return e
+					}
+					p["type"] = secretType
 				}
 				result, e := c.Execute(cmd.Context(), kind+"."+op, p)
 				if e != nil {
 					return e
+				}
+				if kind == "bucket" && verb == "read" && format != "json" {
+					var snapshot darkvault.BucketSnapshot
+					if json.Unmarshal(result, &snapshot) != nil {
+						return errors.New("invalid bucket snapshot")
+					}
+					values, err := snapshot.TypedSecrets()
+					if err != nil {
+						return err
+					}
+					tree, err := darkvault.BuildConfiguration(values, format != "typed-json")
+					if err != nil {
+						return err
+					}
+					if format == "yaml" {
+						text, err := darkvault.ConfigurationYAML(tree)
+						if err != nil {
+							return err
+						}
+						_, err = fmt.Fprint(cmd.OutOrStdout(), text)
+						return err
+					}
+					text, err := json.MarshalIndent(tree, "", "  ")
+					if err != nil {
+						return errors.New("invalid configuration")
+					}
+					_, err = fmt.Fprintln(cmd.OutOrStdout(), string(text))
+					return err
 				}
 				if kind == "secret" && verb == "get" {
 					var s struct {

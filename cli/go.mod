@@ -3,13 +3,13 @@ module github.com/Bobsans/DarkVault/cli
 go 1.26.0
 
 require (
-	github.com/Bobsans/DarkVault/clients/go v0.0.0
+	github.com/Bobsans/DarkVault/clients/go/v2 v2.0.0
 	github.com/spf13/cobra v1.10.2
 	golang.org/x/sys v0.48.0
 	golang.org/x/term v0.46.0
 )
 
-replace github.com/Bobsans/DarkVault/clients/go => ../clients/go
+replace github.com/Bobsans/DarkVault/clients/go/v2 => ../clients/go
 
 require (
 	github.com/go-jose/go-jose/v4 v4.1.5 // indirect

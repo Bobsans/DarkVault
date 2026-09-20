@@ -28,11 +28,19 @@ internal sealed record ErrorResult(VaultError Error);
 internal sealed record DeleteResult(bool Deleted);
 internal sealed record RevokeResult(bool Revoked);
 internal sealed record TokenCreated(VaultStore.TokenRecord Metadata, string Token);
-internal sealed record AuditEntry(DateTimeOffset Time, string Principal, string Operation, string? BucketId, string? SecretId, string RequestId, string Result);
+internal sealed record AuditEntry(DateTimeOffset Time, string Principal, string Operation, string? BucketId, string? SecretId, string RequestId, string Result,
+    string Kind = "operation", string? PrincipalType = null, string? PrincipalName = null, string? TraceId = null,
+    DateTimeOffset? StartedAt = null, string? SourceIp = null, string? PeerIp = null, string? Method = null,
+    string? Path = null, int? StatusCode = null, double? DurationMs = null, AuditDetails? Details = null);
 
 [JsonSourceGenerationOptions(PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase, GenerationMode = JsonSourceGenerationMode.Metadata)]
 [JsonSerializable(typeof(KeyRing.Ring))]
+[JsonSerializable(typeof(KeyRing.ProtectedRing))]
 [JsonSerializable(typeof(VaultStore.Admin))]
+[JsonSerializable(typeof(VaultStore.MfaState))]
+[JsonSerializable(typeof(AdminMfa.OptionsResult))]
+[JsonSerializable(typeof(AdminMfa.VerifyRequest))]
+[JsonSerializable(typeof(AdminMfa.VerifyResult))]
 [JsonSerializable(typeof(VaultStore.TokenRecord))]
 [JsonSerializable(typeof(VaultStore.StoredSecret))]
 [JsonSerializable(typeof(Page<VaultStore.TokenRecord>))]

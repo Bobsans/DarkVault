@@ -108,13 +108,15 @@ Scopes do not replace bucket grants.
 | `get_token_info()` | Token metadata |
 | `execute(operation, parameters)` | Validated dictionary for a supported data operation; advanced wire API |
 
-Names, keys, descriptions, and values are strings. Revisions are integers from 0
+Names, keys, and descriptions are strings. Secret writes accept string, int/float,
+bool, or None; ordinary reads expose canonical strings and type metadata.
+Revisions are integers from 0
 through 9007199254740991. List options and `recursive` are keyword-only.
 
 Metadata is returned as dictionaries with camelCase keys:
 
 - Bucket: `id`, `name`, `description`, `revision`, `createdAt`, `updatedAt`.
-- Secret metadata: `id`, `bucketId`, `key`, `revision`, `createdAt`, `updatedAt`.
+- Secret metadata: `id`, `bucketId`, `key`, `revision`, `createdAt`, `updatedAt`, `type`.
 - Page: `items`, `nextCursor`.
 - Token: `id`, `name`, `scopes`, `bucketIds`, `allBuckets`,
   `creatableBucketNames`, `expiresAt`.
@@ -215,3 +217,7 @@ For consumer applications, use a published PyPI version and pin it through your
 normal dependency management.
 
 [DarkVault and server setup](https://github.com/Bobsans/DarkVault#readme) · [API schema](https://github.com/Bobsans/DarkVault/blob/main/docs/openapi.json) · [Issues](https://github.com/Bobsans/DarkVault/issues) · [MIT license](https://github.com/Bobsans/DarkVault/blob/main/LICENSE)
+
+## Typed configuration
+
+Secret types are string, number, boolean, and null. String reads remain available; typed reads preserve scalar types. See [the configuration contract](https://github.com/Bobsans/DarkVault/blob/main/docs/configuration.md) for SDK methods, nested paths, JSON/YAML export, and string fallback rules.

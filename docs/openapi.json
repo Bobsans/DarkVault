@@ -126,6 +126,18 @@
           },
           "default": {
             "description": "Encrypted application error, or non-secret JSON error before envelope validation"
+          },
+          "429": {
+            "description": "Application quota or temporary source ban",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "description": "Seconds before retrying; never blindly retry mutations."
+              }
+            }
           }
         }
       }
@@ -269,6 +281,18 @@
           },
           "default": {
             "description": "Encrypted application error, or non-secret JSON error before envelope validation"
+          },
+          "429": {
+            "description": "Application quota or temporary source ban",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "description": "Seconds before retrying; never blindly retry mutations."
+              }
+            }
           }
         }
       }
@@ -284,6 +308,18 @@
                 "schema": {
                   "$ref": "#/components/schemas/CryptoKey"
                 }
+              }
+            }
+          },
+          "429": {
+            "description": "Application quota or temporary source ban",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "description": "Seconds before retrying; never blindly retry mutations."
               }
             }
           }
@@ -316,6 +352,18 @@
                 }
               }
             }
+          },
+          "429": {
+            "description": "Application quota or temporary source ban",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "description": "Seconds before retrying; never blindly retry mutations."
+              }
+            }
           }
         }
       }
@@ -340,6 +388,16 @@
                   },
                   "password": {
                     "type": "string"
+                  },
+                  "recoveryCode": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
                   }
                 },
                 "required": [
@@ -353,13 +411,52 @@
         },
         "responses": {
           "200": {
-            "description": "Completed"
+            "description": "Password accepted; MFA required, no administrative session yet",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "authenticated": {
+                      "const": false
+                    },
+                    "mode": {
+                      "enum": [
+                        "register",
+                        "verify"
+                      ]
+                    },
+                    "options": {
+                      "type": "object"
+                    }
+                  },
+                  "required": [
+                    "authenticated",
+                    "mode",
+                    "options"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
           },
           "400": {
             "description": "Invalid input or CSRF"
           },
           "401": {
             "description": "Authentication required"
+          },
+          "429": {
+            "description": "Application quota or temporary source ban",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "description": "Seconds before retrying; never blindly retry mutations."
+              }
+            }
           }
         }
       }
@@ -395,6 +492,18 @@
           },
           "401": {
             "description": "Authentication required"
+          },
+          "429": {
+            "description": "Application quota or temporary source ban",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "description": "Seconds before retrying; never blindly retry mutations."
+              }
+            }
           }
         }
       }
@@ -440,6 +549,244 @@
           },
           "401": {
             "description": "Authentication required"
+          },
+          "429": {
+            "description": "Application quota or temporary source ban",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "description": "Seconds before retrying; never blindly retry mutations."
+              }
+            }
+          }
+        }
+      }
+    },
+    "/admin/mfa/options": {
+      "post": {
+        "operationId": "adminMfaOptions",
+        "security": [
+          {
+            "AdminSession": [],
+            "Csrf": []
+          }
+        ],
+        "description": "Same-origin WebAuthn with required user verification; verify consumes a short-lived HttpOnly challenge cookie.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {},
+                "required": [],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "WebAuthn options",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "authenticated": {
+                      "type": "boolean"
+                    },
+                    "mode": {
+                      "enum": [
+                        "register",
+                        "verify"
+                      ]
+                    },
+                    "options": {
+                      "type": "object"
+                    }
+                  },
+                  "required": [
+                    "authenticated",
+                    "mode",
+                    "options"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Invalid authentication or expired/consumed challenge"
+          },
+          "403": {
+            "description": "Recent MFA required"
+          },
+          "429": {
+            "description": "Application quota or temporary source ban",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "description": "Seconds before retrying; never blindly retry mutations."
+              }
+            }
+          }
+        }
+      }
+    },
+    "/admin/mfa/register": {
+      "post": {
+        "operationId": "adminMfaRegister",
+        "security": [
+          {
+            "AdminSession": [],
+            "Csrf": []
+          }
+        ],
+        "description": "Same-origin WebAuthn with required user verification; verify consumes a short-lived HttpOnly challenge cookie.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {},
+                "required": [],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "WebAuthn options",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "authenticated": {
+                      "type": "boolean"
+                    },
+                    "mode": {
+                      "enum": [
+                        "register",
+                        "verify"
+                      ]
+                    },
+                    "options": {
+                      "type": "object"
+                    }
+                  },
+                  "required": [
+                    "authenticated",
+                    "mode",
+                    "options"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Invalid authentication or expired/consumed challenge"
+          },
+          "403": {
+            "description": "Recent MFA required"
+          },
+          "429": {
+            "description": "Application quota or temporary source ban",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "description": "Seconds before retrying; never blindly retry mutations."
+              }
+            }
+          }
+        }
+      }
+    },
+    "/admin/mfa/verify": {
+      "post": {
+        "operationId": "adminMfaVerify",
+        "security": [
+          {
+            "Csrf": []
+          }
+        ],
+        "description": "Same-origin WebAuthn with required user verification; verify consumes a short-lived HttpOnly challenge cookie.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "credential": {
+                    "type": "object"
+                  }
+                },
+                "required": [
+                  "credential"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Administrative session and one-time recovery codes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "authenticated": {
+                      "type": "boolean"
+                    },
+                    "recoveryCodes": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "required": [
+                    "authenticated",
+                    "recoveryCodes"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Invalid authentication or expired/consumed challenge"
+          },
+          "403": {
+            "description": "Recent MFA required"
+          },
+          "429": {
+            "description": "Application quota or temporary source ban",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "description": "Seconds before retrying; never blindly retry mutations."
+              }
+            }
           }
         }
       }
@@ -550,6 +897,14 @@
           "updatedAt": {
             "type": "string",
             "format": "date-time"
+          },
+          "type": {
+            "enum": [
+              "string",
+              "number",
+              "boolean",
+              "null"
+            ]
           }
         },
         "required": [
@@ -558,7 +913,8 @@
           "key",
           "revision",
           "createdAt",
-          "updatedAt"
+          "updatedAt",
+          "type"
         ],
         "additionalProperties": false
       },
@@ -660,12 +1016,25 @@
             "additionalProperties": {
               "type": "string"
             }
+          },
+          "types": {
+            "type": "object",
+            "additionalProperties": {
+              "enum": [
+                "string",
+                "number",
+                "boolean",
+                "null"
+              ]
+            },
+            "description": "Sparse type map; missing keys are string."
           }
         },
         "required": [
           "bucketId",
           "revision",
-          "secrets"
+          "secrets",
+          "types"
         ],
         "additionalProperties": false
       },
@@ -781,6 +1150,14 @@
             "type": "string",
             "format": "date-time"
           },
+          "type": {
+            "enum": [
+              "string",
+              "number",
+              "boolean",
+              "null"
+            ]
+          },
           "value": {
             "type": "string"
           }
@@ -792,6 +1169,7 @@
           "revision",
           "createdAt",
           "updatedAt",
+          "type",
           "value"
         ],
         "additionalProperties": false
@@ -837,6 +1215,162 @@
         ],
         "additionalProperties": false
       },
+      "AuditResource": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string"
+          },
+          "bucketId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "revision": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "type": {
+            "anyOf": [
+              {
+                "enum": [
+                  "string",
+                  "number",
+                  "boolean",
+                  "null"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "kind",
+          "id",
+          "name",
+          "bucketId",
+          "revision",
+          "type"
+        ],
+        "additionalProperties": false
+      },
+      "AuditDetails": {
+        "type": "object",
+        "properties": {
+          "bucket": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "tokenId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "expectedRevision": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "recursive": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "resources": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AuditResource"
+            }
+          },
+          "returnedCount": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "token": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TokenInfo"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "bucket",
+          "key",
+          "tokenId",
+          "expectedRevision",
+          "recursive",
+          "resources",
+          "returnedCount",
+          "token"
+        ],
+        "additionalProperties": false
+      },
       "Audit": {
         "type": "object",
         "properties": {
@@ -878,6 +1412,125 @@
           },
           "result": {
             "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "operation",
+              "http"
+            ]
+          },
+          "principalType": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "principalName": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "traceId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "startedAt": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "sourceIp": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "peerIp": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "method": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "path": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "statusCode": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "durationMs": {
+            "anyOf": [
+              {
+                "type": "number",
+                "minimum": 0
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "details": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AuditDetails"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
@@ -1658,6 +2311,14 @@
               },
               "value": {
                 "type": "string"
+              },
+              "type": {
+                "enum": [
+                  "string",
+                  "number",
+                  "boolean",
+                  "null"
+                ]
               }
             },
             "required": [
@@ -2055,6 +2716,14 @@
                 "type": "integer",
                 "minimum": 0,
                 "maximum": 9007199254740991
+              },
+              "type": {
+                "enum": [
+                  "string",
+                  "number",
+                  "boolean",
+                  "null"
+                ]
               }
             },
             "required": [
@@ -2183,6 +2852,14 @@
                 "type": "integer",
                 "minimum": 0,
                 "maximum": 9007199254740991
+              },
+              "type": {
+                "enum": [
+                  "string",
+                  "number",
+                  "boolean",
+                  "null"
+                ]
               }
             },
             "required": [
@@ -2583,7 +3260,8 @@
                   {
                     "type": "null"
                   }
-                ]
+                ],
+                "description": "Omitted or null: 30 days. Explicit expiry must be in the future and within 90 days."
               }
             },
             "required": [
@@ -2963,7 +3641,51 @@
             "const": "audit.list"
           },
           "parameters": {
-            "$ref": "#/components/schemas/PageParameters"
+            "type": "object",
+            "properties": {
+              "cursor": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "limit": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 200
+              },
+              "order": {
+                "enum": [
+                  "",
+                  "asc",
+                  "desc"
+                ]
+              },
+              "search": {
+                "type": "string",
+                "maxLength": 256
+              },
+              "kind": {
+                "enum": [
+                  "",
+                  "http",
+                  "operation"
+                ]
+              },
+              "result": {
+                "enum": [
+                  "",
+                  "success",
+                  "failure"
+                ]
+              }
+            },
+            "required": [],
+            "additionalProperties": false
           },
           "replyKey": {
             "$ref": "#/components/schemas/PublicKey"

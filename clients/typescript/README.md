@@ -122,15 +122,17 @@ The final optional `signal?: AbortSignal` is omitted from the table.
 | `getTokenInfo()` | `TokenInfo` |
 | `execute<T = unknown>(operation, parameters)` | `T`; advanced wire API |
 
-Names, keys, descriptions, and values are strings. Revisions must be nonnegative
+Names, keys, and descriptions are strings. Secret writes accept `SecretScalar`
+(string, number, boolean, null); ordinary reads expose canonical strings and type metadata.
+Revisions must be nonnegative
 safe integers; cursors are `string | null`. Limits are integers from 1 to 200.
 
 Exported interfaces:
 
 - `Bucket`: `id`, `name`, `description`, `revision`, `createdAt`, `updatedAt`.
-- `SecretMetadata`: `id`, `bucketId`, `key`, `revision`, `createdAt`, `updatedAt`.
+- `SecretMetadata`: `id`, `bucketId`, `key`, `revision`, `createdAt`, `updatedAt`, `type`.
 - `Secret`: extends metadata with `value`.
-- `BucketSnapshot`: `bucketId`, `revision`, `secrets`.
+- `BucketSnapshot`: `bucketId`, `revision`, `secrets`, sparse `types`.
 - `Page<T>`: `items: T[]`, `nextCursor: string | null`.
 - `TokenInfo`: `id`, `name`, `scopes`, `bucketIds`, `allBuckets`,
   `creatableBucketNames`, `expiresAt`.
@@ -226,3 +228,7 @@ used by the administrative UI. Most applications should use `DarkVaultClient`;
 the protocol helpers do not replace token authorization or CSRF/session handling.
 
 [DarkVault and server setup](https://github.com/Bobsans/DarkVault#readme) · [API schema](https://github.com/Bobsans/DarkVault/blob/main/docs/openapi.json) · [Issues](https://github.com/Bobsans/DarkVault/issues) · [MIT license](https://github.com/Bobsans/DarkVault/blob/main/LICENSE)
+
+## Typed configuration
+
+Secret types are string, number, boolean, and null. String reads remain available; typed reads preserve scalar types. See [the configuration contract](https://github.com/Bobsans/DarkVault/blob/main/docs/configuration.md) for SDK methods, nested paths, JSON/YAML export, and string fallback rules.

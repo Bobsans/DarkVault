@@ -10,7 +10,7 @@ import (
 	"strings"
 
 	"github.com/Bobsans/DarkVault/cli/config"
-	client "github.com/Bobsans/DarkVault/clients/go"
+	client "github.com/Bobsans/DarkVault/clients/go/v2"
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 )

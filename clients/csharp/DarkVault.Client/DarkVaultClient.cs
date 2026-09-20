@@ -35,20 +35,36 @@ public sealed class DarkVaultClient : IDisposable {
         ExecuteAsync<BucketSnapshot>("bucket.read", new { bucket }, cancellationToken);
     public async Task<IReadOnlyDictionary<string, string?>> ReadBucketAsync(string bucket, CancellationToken cancellationToken = default) =>
         (await ReadBucketSnapshotAsync(bucket, cancellationToken)).Secrets;
+    public async Task<IReadOnlyDictionary<string, JsonElement>> ReadTypedBucketAsync(string bucket, CancellationToken cancellationToken = default) =>
+        SecretValues.Typed(await ReadBucketSnapshotAsync(bucket, cancellationToken));
+    public async Task<T> ReadConfigurationAsync<T>(string bucket, System.Text.Json.Serialization.Metadata.JsonTypeInfo<T> typeInfo, CancellationToken cancellationToken = default) =>
+        SecretValues.Configuration(await ReadTypedBucketAsync(bucket, cancellationToken)).Deserialize(typeInfo) ?? throw new FormatException("Invalid configuration.");
     public Task<Bucket> UpdateBucketAsync(string bucket, string description, long expectedRevision, CancellationToken cancellationToken = default) =>
         ExecuteAsync<Bucket>("bucket.update", new { bucket, description, expectedRevision }, cancellationToken);
     public async Task DeleteBucketAsync(string bucket, long expectedRevision, bool recursive = false, CancellationToken cancellationToken = default) =>
         _ = await ExecuteAsync<JsonElement>("bucket.delete", new { bucket, expectedRevision, recursive }, cancellationToken);
     public Task<SecretMetadata> AddSecretAsync(string bucket, string key, string value, CancellationToken cancellationToken = default) =>
         ExecuteAsync<SecretMetadata>("secret.create", new { bucket, key, value }, cancellationToken);
+    public Task<SecretMetadata> AddSecretAsync(string bucket, string key, JsonElement value, CancellationToken cancellationToken = default) =>
+        WriteTypedSecretAsync("secret.create", bucket, key, value, null, cancellationToken);
     public Task<Secret> ReadSecretAsync(string bucket, string key, CancellationToken cancellationToken = default) =>
         ExecuteAsync<Secret>("secret.read", new { bucket, key }, cancellationToken);
     public Task<Page<SecretMetadata>> ListSecretsAsync(string bucket, string? cursor = null, int limit = 100, CancellationToken cancellationToken = default) =>
         ExecuteAsync<Page<SecretMetadata>>("secret.list", new { bucket, cursor, limit }, cancellationToken);
     public Task<SecretMetadata> UpdateSecretAsync(string bucket, string key, string value, long expectedRevision, CancellationToken cancellationToken = default) =>
         ExecuteAsync<SecretMetadata>("secret.update", new { bucket, key, value, expectedRevision }, cancellationToken);
+    public Task<SecretMetadata> UpdateSecretAsync(string bucket, string key, JsonElement value, long expectedRevision, CancellationToken cancellationToken = default) =>
+        WriteTypedSecretAsync("secret.update", bucket, key, value, expectedRevision, cancellationToken);
     public Task<SecretMetadata> SetSecretAsync(string bucket, string key, string value, long expectedRevision = 0, CancellationToken cancellationToken = default) =>
         ExecuteAsync<SecretMetadata>("secret.set", new { bucket, key, value, expectedRevision }, cancellationToken);
+    public Task<SecretMetadata> SetSecretAsync(string bucket, string key, JsonElement value, long expectedRevision = 0, CancellationToken cancellationToken = default) =>
+        WriteTypedSecretAsync("secret.set", bucket, key, value, expectedRevision, cancellationToken);
+    private Task<SecretMetadata> WriteTypedSecretAsync(string operation, string bucket, string key, JsonElement input, long? revision, CancellationToken ct) {
+        var (value, type) = SecretValues.Encode(input);
+        var parameters = new Dictionary<string, object?> { ["bucket"] = bucket, ["key"] = key, ["value"] = value, ["type"] = type };
+        if (revision is not null) parameters["expectedRevision"] = revision.Value;
+        return ExecuteAsync<SecretMetadata>(operation, parameters, ct);
+    }
     public async Task DeleteSecretAsync(string bucket, string key, long expectedRevision, CancellationToken cancellationToken = default) =>
         _ = await ExecuteAsync<JsonElement>("secret.delete", new { bucket, key, expectedRevision }, cancellationToken);
     public Task<TokenInfo> GetTokenInfoAsync(CancellationToken cancellationToken = default) => ExecuteAsync<TokenInfo>("token.info", new { }, cancellationToken);

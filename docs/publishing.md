@@ -18,7 +18,7 @@ executable, SQLite и SPA упаковываются без пересборки
 | TypeScript SDK              | npm                      | `@darkvault/client`                          |
 | C# SDK                      | NuGet.org                | `DarkVault.Client`                           |
 | .NET configuration provider | NuGet.org                | `DarkVault.Extensions.Configuration`         |
-| Go SDK                      | GitHub / Go module proxy | `github.com/Bobsans/DarkVault/clients/go`    |
+| Go SDK                      | GitHub / Go module proxy | `github.com/Bobsans/DarkVault/clients/go/v2`    |
 | Сервер и CLI                | GitHub Releases          | Архивы для Linux, Windows и macOS, x64/ARM64 |
 
 Пакеты собираются один раз, проверяются `tools/check-release.py`, сохраняются
@@ -147,11 +147,11 @@ Workflow устанавливает npm 11 с поддержкой OIDC и Node.
 Публичный GitHub-репозиторий, корректный `go.mod` и этот тег позволяют получить модуль:
 
 ```sh
-go get github.com/Bobsans/DarkVault/clients/go@v1.0.0
+go get github.com/Bobsans/DarkVault/clients/go/v2@v2.0.0
 ```
 
 Появление в proxy и pkg.go.dev может запаздывать. При необходимости запросите
-конкретную версию через `go list -m github.com/Bobsans/DarkVault/clients/go@v1.0.0`
+конкретную версию через `go list -m github.com/Bobsans/DarkVault/clients/go/v2@v2.0.0`
 или откройте страницу модуля на pkg.go.dev. [Публикация Go-модулей](https://go.dev/doc/modules/publishing).
 Сервер и CLI скачиваются из GitHub Releases; публикация в Docker Hub, winget,
 Chocolatey и Homebrew в этот workflow не входит.

@@ -28,15 +28,18 @@ public sealed class HttpTests {
         JsonElement Run(string op, object p) => JsonSerializer.SerializeToElement(store.Run(admin, op, JsonSerializer.SerializeToElement(p), Guid.NewGuid().ToString()), Wire.Json);
         var bucket = Run("bucket.create", new { name = "qa" }).GetProperty("id").GetString();
         var token = Run("token.create", new { name = "sdk", scopes = VaultStore.Scopes, bucketIds = new[] { bucket }, allBuckets = false, creatableBucketNames = Array.Empty<string>(), expiresAt = (string?)null }).GetProperty("token").GetString()!;
-        await using var app = VaultApplication.Build([], store, ring, directory);
+        await using var app = VaultApplication.Build(["--DARKVAULT_TRUSTED_PROXIES=127.0.0.1,::1"], store, ring, directory);
         // Test-only certificate pin; production clients use the OS trust store.
         app.Urls.Add("https://127.0.0.1:0");
         app.Configuration["Kestrel:Certificates:Default:Path"] = Path.Combine(directory, "test.pfx");
         await File.WriteAllBytesAsync(Path.Combine(directory, "test.pfx"), cert.Export(X509ContentType.Pfx));
         await app.StartAsync(); var url = app.Urls.Single();
         using var http = new HttpClient(new HttpClientHandler { AllowAutoRedirect = false, ServerCertificateCustomValidationCallback = (_, c, _, _) => c?.Thumbprint == cert.Thumbprint });
+        http.DefaultRequestHeaders.Add("X-Forwarded-For", "198.51.100.42");
+        http.DefaultRequestHeaders.Add("Origin", url);
+        using var passkey = new TestPasskey();
         try {
-            foreach (var path in new[] { "/", "/index.html", "/app.js", "/style.css" }) {
+            foreach (var path in new[] { "/", "/index.html", "/app.js", "/style.css", "/admin", "/admin/buckets", "/admin/buckets/qa", "/admin/tokens", "/admin/logs?kind=http", "/admin/settings" }) {
                 using var asset = await http.GetAsync(url + path);
                 Assert.That(asset.StatusCode, Is.EqualTo(HttpStatusCode.OK), path);
                 Assert.That(asset.Headers.CacheControl?.NoStore, Is.True, path);
@@ -45,7 +48,7 @@ public sealed class HttpTests {
             var html = await http.GetStringAsync(url + "/");
             Assert.That(html, Does.Contain("id=\"login-form\"").And.Contain("src=\"/app.js\""));
             Assert.That(html, Does.Not.Contain("@page"));
-            foreach (var path in new[] { "/api/v1/missing", "/admin/api/v1/missing", "/missing.js", "/protocol.js" }) {
+            foreach (var path in new[] { "/api/v1/missing", "/admin/api/v1/missing", "/missing.js", "/protocol.js", "/admin/missing", "/admin/missing.js", "/admin/buckets/invalid.html" }) {
                 using var missing = await http.GetAsync(url + path);
                 Assert.That(missing.StatusCode, Is.EqualTo(HttpStatusCode.NotFound), path);
             }
@@ -54,6 +57,15 @@ public sealed class HttpTests {
             Assert.That((await client.ReadBucketAsync("qa"))["ConnectionStrings:Main"], Is.EqualTo("秘密\nvalue"));
             var configuration = new ConfigurationBuilder(); await configuration.AddFromDarkVaultBucketAsync(client, "qa");
             Assert.That(configuration.Build()["ConnectionStrings:Main"], Is.EqualTo("秘密\nvalue"));
+            await client.AddSecretAsync("qa", "Redis:Port", SecretValues.Parse("6379", "number"));
+            await client.AddSecretAsync("qa", "Redis:Enabled", SecretValues.Parse("false", "boolean"));
+            await client.AddSecretAsync("qa", "Redis:Optional", SecretValues.Parse("null", "null"));
+            var typedConfig = await client.ReadConfigurationAsync("qa", Wire.TypeInfo<JsonElement>());
+            Assert.That(typedConfig.GetProperty("Redis").GetProperty("Port").GetInt32(), Is.EqualTo(6379));
+            Assert.That(typedConfig.GetProperty("Redis").GetProperty("Enabled").GetBoolean(), Is.False);
+            var stringConfig = new ConfigurationBuilder(); await stringConfig.AddFromDarkVaultBucketAsync(client, "qa");
+            Assert.That(stringConfig.Build()["Redis:Port"], Is.EqualTo("6379"));
+            Assert.That(stringConfig.Build()["Redis:Optional"], Is.Null);
             var updated = await client.UpdateSecretAsync("qa", secret.Key, "updated", secret.Revision);
             Assert.That((await client.ReadSecretAsync("qa", secret.Key)).Value, Is.EqualTo("updated"));
             Assert.ThrowsAsync<DarkVaultException>(async () => await client.DeleteSecretAsync("qa", secret.Key, secret.Revision));
@@ -63,10 +75,48 @@ public sealed class HttpTests {
             var session = await http.GetFromJsonAsync<JsonElement>(url + "/admin/api/v1/session");
             http.DefaultRequestHeaders.Add("X-CSRF-Token", session.GetProperty("csrfToken").GetString());
             using var login = await http.PostAsJsonAsync(url + "/admin/login", new { username = "admin", password = "test-password-for-http-only" }); Assert.That(login.IsSuccessStatusCode, Is.True);
+            var pendingSession = await http.GetFromJsonAsync<JsonElement>(url + "/admin/api/v1/session"); Assert.That(pendingSession.GetProperty("authenticated").GetBoolean(), Is.False);
+            await passkey.Finish(http, url, login);
             var loggedIn = await http.GetFromJsonAsync<JsonElement>(url + "/admin/api/v1/session"); Assert.That(loggedIn.GetProperty("authenticated").GetBoolean(), Is.True);
             using var noToken = await http.PostAsync(url + "/api/v1/execute", new StringContent("invalid", Encoding.UTF8, "application/jose")); Assert.That(noToken.StatusCode, Is.EqualTo(HttpStatusCode.Unauthorized));
+            using (var malformed = new HttpRequestMessage(HttpMethod.Post, url + "/api/v1/execute")) {
+                malformed.Headers.Authorization = new("Bearer", token);
+                malformed.Content = new StringContent("private-malformed-body", Encoding.UTF8, "application/jose");
+                using var rejected = await http.SendAsync(malformed); Assert.That(rejected.StatusCode, Is.EqualTo(HttpStatusCode.BadRequest));
+            }
+            using var query = await http.GetAsync(url + "/health/ready?token=private-query-value");
             using var logout = await http.PostAsJsonAsync(url + "/admin/logout", new { }); Assert.That(logout.IsSuccessStatusCode, Is.True);
+            using var loginAgain = await http.PostAsJsonAsync(url + "/admin/login", new { username = "admin", password = "test-password-for-http-only" }); Assert.That(loginAgain.IsSuccessStatusCode, Is.True);
+            await passkey.Finish(http, url, loginAgain);
+            using var password = await http.PostAsJsonAsync(url + "/admin/password", new { currentPassword = "test-password-for-http-only", newPassword = "new-test-password-for-http-only" }); Assert.That(password.IsSuccessStatusCode, Is.True);
             Run("token.revoke", new { id = (await client.GetTokenInfoAsync()).Id }); Assert.ThrowsAsync<DarkVaultException>(async () => await client.ReadBucketAsync("qa"));
+            for (var i = 0; i < 11; i++) {
+                using var attempt = await http.PostAsJsonAsync(url + "/admin/login", new { username = "admin", password = "wrong-test-password" });
+                if (i == 10) { Assert.That(attempt.StatusCode, Is.EqualTo(HttpStatusCode.TooManyRequests)); Assert.That(attempt.Headers.RetryAfter, Is.Not.Null); }
+            }
+            // Stop waits for the last HTTP request's completion audit before inspecting SQLite.
+            await app.StopAsync();
+            var audit = Run("audit.list", new { limit = 200 }).GetProperty("items").EnumerateArray().ToArray();
+            var requests = audit.Where(e => e.GetProperty("kind").GetString() == "http").ToArray();
+            Assert.That(requests, Is.Not.Empty);
+            Assert.That(requests.All(e => e.GetProperty("sourceIp").GetString() == "198.51.100.42"), Is.True);
+            Assert.That(requests.All(e => e.GetProperty("peerIp").GetString() is "127.0.0.1" or "::ffff:127.0.0.1"), Is.True);
+            Assert.That(requests.All(e => e.GetProperty("durationMs").GetDouble() >= 0 && Guid.TryParse(e.GetProperty("traceId").GetString(), out _)), Is.True);
+            foreach (var path in new[] { "/health/ready", "/api/v1/execute", "/admin/api/v1/session" })
+                Assert.That(requests.Any(e => e.GetProperty("path").GetString() == path), Is.True, path);
+            Assert.That(requests.Any(e => e.GetProperty("principal").GetString() == "anonymous" || e.GetProperty("statusCode").GetInt32() == 429), Is.False);
+            foreach (var result in new[] { "invalid_envelope", "revision_conflict" })
+                Assert.That(requests.Any(e => e.GetProperty("result").GetString() == result), Is.True, result);
+            foreach (var operation in new[] { "admin.logout", "admin.password" })
+                Assert.That(requests.Any(e => e.GetProperty("operation").GetString() == operation && e.GetProperty("principal").GetString() == store.Administrator!.Id && e.GetProperty("result").GetString() == "success"), Is.True, operation);
+            var created = audit.Single(e => e.GetProperty("kind").GetString() == "operation" && e.GetProperty("secretId").GetString() == secret.Id && e.GetProperty("operation").GetString() == "secret.create");
+            var completed = requests.Single(e => e.GetProperty("traceId").GetString() == created.GetProperty("traceId").GetString());
+            Assert.That(completed.GetProperty("requestId").GetString(), Is.EqualTo(created.GetProperty("requestId").GetString()));
+            Assert.That(completed.GetProperty("statusCode").GetInt32(), Is.EqualTo(201));
+            Assert.That(completed.GetProperty("principalName").GetString(), Is.EqualTo("sdk"));
+            var auditJson = JsonSerializer.Serialize(audit, Wire.Json);
+            foreach (var sensitive in new[] { token, "test-password-for-http-only", "new-test-password-for-http-only", "private-malformed-body", "private-query-value", "秘密", "updated", session.GetProperty("csrfToken").GetString()! })
+                Assert.That(auditJson, Does.Not.Contain(sensitive));
         } finally { await app.StopAsync(); store.Dispose(); Directory.Delete(directory, true); }
     }
 }

@@ -2,10 +2,21 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { CompactEncrypt, importJWK } from 'jose';
-import { DarkVaultClient, DarkVaultError } from '../dist/index.js';
+import { DarkVaultClient, DarkVaultError, parseScalar, encodeScalar, buildConfiguration, formatConfiguration } from '../dist/index.js';
 import { encryptRequest, decryptResponse, parseStrict, readBounded } from '../dist/protocol.js';
 
 const token = 'dv1_' + 'A'.repeat(60);
+test('Typed scalars and configuration export preserve types and reject ambiguous paths', () => {
+    assert.equal(parseScalar('00123'), '00123'); assert.equal(parseScalar('false', 'boolean'), false); assert.equal(parseScalar('null', 'null'), null);
+    for (const value of [NaN, Infinity, 9007199254740992, {}, []]) assert.throws(() => encodeScalar(value));
+    for (const [value, type] of [['01','number'], ['true','number'], ['1','boolean'], ['','null']]) assert.throws(() => parseScalar(value,type));
+    const tree = buildConfiguration({ 'Redis:Port': 6379, 'Redis:Enabled': false, 'Literal\\:Key': '00123', '__proto__:safe': true, 'Empty': null, 'Years:2026': 'x' });
+    assert.equal(tree.Redis.Port, 6379); assert.equal(tree.Redis.Enabled, false); assert.equal(tree['Literal:Key'], '00123');
+    assert.equal(tree.__proto__.safe, true); assert.equal({}.safe, undefined); assert.equal(tree.Years['2026'], 'x');
+    const yaml = formatConfiguration(tree, 'yaml'); assert.match(yaml, /"Port": 6379/); assert.match(yaml, /"Enabled": false/); assert.match(yaml, /"Literal:Key": "00123"/); assert.match(yaml, /"Empty": null/);
+    for (const values of [{ A: 'x', 'A:B': 1 }, { 'A:B': 1, A: null }, { 'A::B': true }, { 'A\\x': true }]) assert.throws(() => buildConfiguration(values));
+    assert.equal(buildConfiguration({ 'A:B': 1, A: 2 }, false)['A:B'], 1);
+});
 test('Validate origin, token, revision, pagination and cancellation', async () => {
     for (const url of ['http://vault.example.com', 'https://user@vault.example.com', 'https://vault.example.com/path']) {
         assert.throws(() => new DarkVaultClient(url, token));
@@ -77,7 +88,14 @@ test('All SDK operations against the .NET HTTPS server', { skip: !process.env.DA
         await client.deleteSecret(name, 'first', secret.revision);
         const snapshot = await client.readBucketSnapshot(name);
         assert.equal(snapshot.bucketId, bucket.id); assert.deepEqual(snapshot.secrets, { second: '' });
-        await client.deleteBucket(name, snapshot.revision, true);
+        await client.addSecret(name, 'Redis:Port', 6379); await client.addSecret(name, 'Redis:Enabled', false); await client.addSecret(name, 'Redis:Optional', null);
+        assert.equal((await client.readSecret(name, 'Redis:Port')).type, 'number');
+        assert.equal((await client.readTypedSecret(name, 'Redis:Enabled')).value, false);
+        assert.equal((await client.readBucket(name))['Redis:Optional'], 'null');
+        const config = await client.readConfiguration(name); assert.equal(config.Redis.Port, 6379); assert.equal(config.Redis.Optional, null);
+        const flag = await client.readSecret(name, 'Redis:Enabled'); await client.updateSecret(name, flag.key, true, flag.revision);
+        assert.equal((await client.readTypedBucket(name))[flag.key], true);
+        await client.deleteBucket(name, (await client.getBucket(name)).revision, true);
     } finally {
         try { const current = await client.getBucket(name); await client.deleteBucket(name, current.revision, true); }
         catch (error) { if (!(error instanceof DarkVaultError) || error.status !== 404) throw error; }

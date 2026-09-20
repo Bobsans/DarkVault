@@ -148,6 +148,41 @@ func TestLiveOperations(t *testing.T) {
 	if err != nil || snapshot.BucketID != bucket.ID || len(snapshot.Secrets) != 1 {
 		t.Fatal("snapshot", err)
 	}
+	if _, err = c.AddTypedSecret(ctx, "go-sdk-live", "Redis:Port", 6379); err != nil {
+		t.Fatal(err)
+	}
+	flag, err := c.AddTypedSecret(ctx, "go-sdk-live", "Redis:Enabled", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = c.AddTypedSecret(ctx, "go-sdk-live", "Redis:Optional", nil); err != nil {
+		t.Fatal(err)
+	}
+	var config struct {
+		Redis struct {
+			Port     int
+			Enabled  bool
+			Optional *string
+		}
+	}
+	if err = c.ReadConfiguration(ctx, "go-sdk-live", &config); err != nil || config.Redis.Port != 6379 || config.Redis.Enabled || config.Redis.Optional != nil {
+		t.Fatal("typed configuration", err)
+	}
+	if _, err = c.UpdateTypedSecret(ctx, "go-sdk-live", flag.Key, true, flag.Revision); err != nil {
+		t.Fatal(err)
+	}
+	typed, err := c.ReadTypedBucket(ctx, "go-sdk-live")
+	if err != nil || typed[flag.Key] != true {
+		t.Fatal("typed read", err)
+	}
+	values, err = c.ReadBucket(ctx, "go-sdk-live")
+	if err != nil || values["Redis:Optional"] != "null" {
+		t.Fatal("string projection", err)
+	}
+	snapshot, err = c.ReadBucketSnapshot(ctx, "go-sdk-live")
+	if err != nil {
+		t.Fatal(err)
+	}
 	if err = c.DeleteBucket(ctx, "go-sdk-live", snapshot.Revision, true); err != nil {
 		t.Fatal(err)
 	}

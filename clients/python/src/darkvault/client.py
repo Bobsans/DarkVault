@@ -17,13 +17,14 @@ from jwcrypto import jwk
 from jwcrypto.common import JWException
 
 from . import _protocol as wire
+from .configuration import SECRET_TYPES, SecretScalar, encode_scalar, parse_scalar, typed_secrets, build_configuration
 
 _READS = {"bucket.get", "bucket.list", "bucket.read", "secret.read", "secret.list", "token.info"}
 _OPERATIONS = _READS | {"bucket.create", "bucket.update", "bucket.delete", "secret.create", "secret.update", "secret.set", "secret.delete"}
 _ERRORS = {"invalid_request", "invalid_envelope", "unsupported_version", "unknown_key", "request_expired",
            "unauthorized", "forbidden", "not_found", "already_exists", "revision_conflict", "bucket_not_empty",
            "replay_detected", "payload_too_large", "rate_limited", "internal_error", "unavailable",
-           "invalid_bucket_name", "invalid_key", "invalid_cursor", "unknown_operation", "revision_exhausted"}
+           "invalid_bucket_name", "invalid_key", "invalid_cursor", "unknown_operation", "revision_exhausted", "invalid_secret_type"}
 
 
 class DarkVaultError(Exception):
@@ -68,10 +69,14 @@ def _data(operation: str, data: Any) -> dict[str, Any]:
         fields = ["key"] if secret else ["name", "description"]
         if secret:
             _uuid(item["bucketId"])
+            if item.get("type", "string") not in SECRET_TYPES:
+                raise ValueError("Invalid secret type")
         if value:
             fields.append("value")
         if any(not isinstance(item[f], str) for f in fields):
             raise ValueError("Invalid record fields")
+        if value:
+            parse_scalar(item["value"], item.get("type", "string"))
 
     if operation.endswith(".delete"):
         if data["deleted"] is not True:
@@ -87,6 +92,7 @@ def _data(operation: str, data: Any) -> dict[str, Any]:
         secrets = data["secrets"]
         if not isinstance(secrets, dict) or any(not isinstance(v, str) for v in secrets.values()):
             raise ValueError("Invalid secret dictionary")
+        typed_secrets(data)
     elif operation == "token.info":
         _uuid(data["id"])
         if not isinstance(data["name"], str) or type(data["allBuckets"]) is not bool:
@@ -325,26 +331,36 @@ class DarkVaultClient:
     def read_bucket(self, bucket: str) -> dict[str, str]:
         return self.read_bucket_snapshot(bucket)["secrets"]
 
+    def read_typed_bucket(self, bucket: str) -> dict[str, SecretScalar]:
+        return typed_secrets(self.read_bucket_snapshot(bucket))
+
+    def read_configuration(self, bucket: str, *, nested: bool = True) -> dict[str, Any]:
+        return build_configuration(self.read_typed_bucket(bucket), nested)
+
     def update_bucket(self, bucket: str, description: str, expected_revision: int) -> dict[str, Any]:
         return self.execute("bucket.update", {"bucket": bucket, "description": description, "expectedRevision": _revision(expected_revision)})
 
     def delete_bucket(self, bucket: str, expected_revision: int, *, recursive: bool = False) -> None:
         self.execute("bucket.delete", {"bucket": bucket, "expectedRevision": _revision(expected_revision), "recursive": recursive})
 
-    def add_secret(self, bucket: str, key: str, value: str) -> dict[str, Any]:
-        return self.execute("secret.create", {"bucket": bucket, "key": key, "value": value})
+    def add_secret(self, bucket: str, key: str, value: SecretScalar) -> dict[str, Any]:
+        return self.execute("secret.create", {"bucket": bucket, "key": key, **encode_scalar(value)})
 
     def read_secret(self, bucket: str, key: str) -> dict[str, Any]:
         return self.execute("secret.read", {"bucket": bucket, "key": key})
 
+    def read_typed_secret(self, bucket: str, key: str) -> dict[str, Any]:
+        secret = self.read_secret(bucket, key)
+        return {**secret, "value": parse_scalar(secret["value"], secret.get("type", "string"))}
+
     def list_secrets(self, bucket: str, *, cursor: str | None = None, limit: int = 100) -> dict[str, Any]:
         return self.execute("secret.list", {"bucket": bucket, "cursor": cursor, "limit": limit})
 
-    def update_secret(self, bucket: str, key: str, value: str, expected_revision: int) -> dict[str, Any]:
-        return self.execute("secret.update", {"bucket": bucket, "key": key, "value": value, "expectedRevision": _revision(expected_revision)})
+    def update_secret(self, bucket: str, key: str, value: SecretScalar, expected_revision: int) -> dict[str, Any]:
+        return self.execute("secret.update", {"bucket": bucket, "key": key, **encode_scalar(value), "expectedRevision": _revision(expected_revision)})
 
-    def set_secret(self, bucket: str, key: str, value: str, expected_revision: int = 0) -> dict[str, Any]:
-        return self.execute("secret.set", {"bucket": bucket, "key": key, "value": value, "expectedRevision": _revision(expected_revision)})
+    def set_secret(self, bucket: str, key: str, value: SecretScalar, expected_revision: int = 0) -> dict[str, Any]:
+        return self.execute("secret.set", {"bucket": bucket, "key": key, **encode_scalar(value), "expectedRevision": _revision(expected_revision)})
 
     def delete_secret(self, bucket: str, key: str, expected_revision: int) -> None:
         self.execute("secret.delete", {"bucket": bucket, "key": key, "expectedRevision": _revision(expected_revision)})

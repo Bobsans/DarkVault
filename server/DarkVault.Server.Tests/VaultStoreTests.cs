@@ -123,6 +123,129 @@ public sealed class VaultStoreTests {
         Assert.Throws<VaultFault>(() => Run<JsonElement>("bucket.create", new { name = "qa\n" }));
     }
     [Test]
+    public void AuditRecordsObjectsActorsFailuresAndTokenPermissionsWithoutValues() {
+        var bucket = Run<Bucket>("bucket.create", new { name = "test", description = "private-description" });
+        var secret = Run<SecretMetadata>("secret.create", new { bucket = bucket.Name, key = "Main", value = "private-audit-value" });
+        var token = Token(["secret:read"], [bucket.Id]); var actor = store.Authenticate(token);
+        Run<Secret>("secret.read", new { bucket = bucket.Name, key = secret.Key }, actor);
+        Assert.Throws<VaultFault>(() => Run<JsonElement>("secret.delete", new { bucket = bucket.Name, key = secret.Key, expectedRevision = secret.Revision }, actor));
+        Run<BucketSnapshot>("bucket.read", new { bucket = bucket.Name });
+        Run<Page<SecretMetadata>>("secret.list", new { bucket = bucket.Name });
+        Run<JsonElement>("token.revoke", new { id = actor.Id });
+        Run<JsonElement>("bucket.delete", new { bucket = bucket.Name, expectedRevision = secret.Revision, recursive = true });
+        var audit = Run<Page<JsonElement>>("audit.list", new { limit = 200 });
+        JsonElement Entry(string operation) => audit.Items.Single(e => e.GetProperty("operation").GetString() == operation);
+        var read = Entry("secret.read");
+        Assert.That(read.GetProperty("principal").GetString(), Is.EqualTo(actor.Id));
+        Assert.That(read.GetProperty("principalType").GetString(), Is.EqualTo("token"));
+        Assert.That(read.GetProperty("principalName").GetString(), Is.EqualTo("test"));
+        Assert.That(read.GetProperty("secretId").GetString(), Is.EqualTo(secret.Id));
+        Assert.That(read.GetProperty("details").GetProperty("resources")[0].GetProperty("revision").GetInt64(), Is.EqualTo(secret.Revision));
+        var denied = Entry("secret.delete");
+        Assert.That(denied.GetProperty("result").GetString(), Is.EqualTo("forbidden"));
+        Assert.That(denied.GetProperty("details").GetProperty("key").GetString(), Is.EqualTo(secret.Key));
+        Assert.That(denied.GetProperty("details").GetProperty("resources").GetArrayLength(), Is.Zero);
+        foreach (var operation in new[] { "bucket.read", "secret.list", "bucket.delete" })
+            Assert.That(Entry(operation).GetProperty("details").GetProperty("resources").EnumerateArray().Select(r => r.GetProperty("id").GetString()), Does.Contain(secret.Id));
+        Assert.That(Entry("token.revoke").GetProperty("details").GetProperty("tokenId").GetString(), Is.EqualTo(actor.Id));
+        Assert.That(Entry("token.create").GetProperty("details").GetProperty("token").GetProperty("scopes")[0].GetString(), Is.EqualTo("secret:read"));
+        Assert.That(Entry("token.create").GetProperty("bucketId").ValueKind, Is.EqualTo(JsonValueKind.Null));
+        var json = JsonSerializer.Serialize(audit, Wire.Json);
+        Assert.That(json, Does.Not.Contain("private-audit-value").And.Not.Contain("private-description").And.Not.Contain(token));
+        store.Dispose(); store = new(Path.Combine(directory, "vault.db"), ring);
+        Assert.That(Run<Page<JsonElement>>("audit.list", new { limit = 200 }).Items.Count, Is.GreaterThan(audit.Items.Count));
+    }
+    [Test]
+    public void SecretTypesSurviveStorageRotationAndRejectTampering() {
+        Run<Bucket>("bucket.create", new { name = "typed" });
+        var number = Run<SecretMetadata>("secret.create", new { bucket = "typed", key = "Count", value = "1e2", type = "number" });
+        Run<SecretMetadata>("secret.create", new { bucket = "typed", key = "Enabled", value = "false", type = "boolean" });
+        Run<SecretMetadata>("secret.create", new { bucket = "typed", key = "Nothing", value = "null", type = "null" });
+        Run<SecretMetadata>("secret.create", new { bucket = "typed", key = "Text", value = "00123" });
+        Assert.That(number.Type, Is.EqualTo("number"));
+        foreach (var (value, type) in new[] { ("NaN", "number"), ("1e999", "number"), ("9007199254740992", "number"), ("yes", "boolean"), ("0", "null"), ("[]", "array") })
+            Assert.That(Assert.Throws<VaultFault>(() => Run<JsonElement>("secret.set", new { bucket = "typed", key = "Invalid", value, type, expectedRevision = 0 }))!.Code, Is.EqualTo("invalid_secret_type"));
+        var snapshot = Run<BucketSnapshot>("bucket.read", new { bucket = "typed" });
+        Assert.That(snapshot.Secrets["Count"], Is.EqualTo("100"));
+        Assert.That(snapshot.Types, Has.Count.EqualTo(3));
+        Assert.That(SecretValues.Typed(snapshot)["Nothing"].ValueKind, Is.EqualTo(JsonValueKind.Null));
+        var encrypted = ring.Encrypt("100", number);
+        Assert.Throws<AuthenticationTagMismatchException>(() => ring.Decrypt(encrypted, number with { Type = "string" }));
+        store.Reencrypt(); store.Verify(); store.Dispose(); store = new(Path.Combine(directory, "vault.db"), ring);
+        Assert.That(Run<Secret>("secret.read", new { bucket = "typed", key = "Count" }).GetTypedValue().GetDouble(), Is.EqualTo(100));
+        var revision = Run<Bucket>("bucket.get", new { bucket = "typed" }).Revision;
+        Run<SecretMetadata>("secret.update", new { bucket = "typed", key = "Count", value = "true", type = "boolean", expectedRevision = number.Revision });
+        Assert.That(Run<Bucket>("bucket.get", new { bucket = "typed" }).Revision, Is.GreaterThan(revision));
+        Assert.That(Run<Secret>("secret.read", new { bucket = "typed", key = "Count" }).GetTypedValue().GetBoolean(), Is.True);
+    }
+    [Test]
+    public void LegacyStringEncryptionRemainsReadableAndCannotAcquireAType() {
+        var metadata = new SecretMetadata(Guid.NewGuid().ToString(), Guid.NewGuid().ToString(), "key", 1, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow);
+        using var state = JsonDocument.Parse(File.ReadAllText(Path.Combine(directory, "keyring.json")));
+        var key = state.RootElement.GetProperty("data")[0];
+        var plain = Encoding.UTF8.GetBytes("legacy-value"); var nonce = RandomNumberGenerator.GetBytes(12); var cipher = new byte[plain.Length]; var tag = new byte[16];
+        using (var aes = new AesGcm(Convert.FromBase64String(key.GetProperty("key").GetString()!), 16))
+            aes.Encrypt(nonce, plain, cipher, tag, Encoding.UTF8.GetBytes(JsonSerializer.Serialize(new object[] { 1, metadata.Id, metadata.BucketId, metadata.Key, metadata.Revision }, Wire.Json)));
+        var encrypted = new EncryptedValue(1, key.GetProperty("id").GetString()!, Wire.Base64(nonce), Wire.Base64(tag), Wire.Base64(cipher));
+        Assert.That(ring.Decrypt(encrypted, metadata), Is.EqualTo("legacy-value"));
+        Assert.Throws<CryptographicException>(() => ring.Decrypt(encrypted, metadata with { Type = "number" }));
+    }
+    [Test]
+    public void AuditFiltersAndDescendingPaginationSelectStoredEvents() {
+        Run<Bucket>("bucket.create", new { name = "audit_filter" });
+        Run<SecretMetadata>("secret.create", new { bucket = "audit_filter", key = "literal_%", value = "private" });
+        Run<Secret>("secret.read", new { bucket = "audit_filter", key = "literal_%" });
+        Assert.Throws<VaultFault>(() => Run<Secret>("secret.read", new { bucket = "audit_filter", key = "missing" }));
+        var first = Run<Page<JsonElement>>("audit.list", new { order = "desc", search = "audit_filter", kind = "operation", result = "success", limit = 1 });
+        Assert.That(first.Items.Single().GetProperty("operation").GetString(), Is.EqualTo("secret.read"));
+        Assert.That(first.NextCursor, Is.Not.Null);
+        var second = Run<Page<JsonElement>>("audit.list", new { order = "desc", search = "audit_filter", kind = "operation", result = "success", limit = 1, cursor = first.NextCursor });
+        Assert.That(second.Items.Single().GetProperty("operation").GetString(), Is.EqualTo("secret.create"));
+        var failed = Run<Page<JsonElement>>("audit.list", new { order = "desc", search = "audit_filter", result = "failure" });
+        Assert.That(failed.Items.Single().GetProperty("result").GetString(), Is.EqualTo("not_found"));
+        Assert.That(Run<Page<JsonElement>>("audit.list", new { search = "literal_%", order = "desc" }).Items.Count, Is.EqualTo(2));
+        Assert.That(Run<Page<JsonElement>>("audit.list", new { kind = "http" }).Items, Is.Empty);
+        Assert.That(Run<Page<JsonElement>>("audit.list", new { search = "' OR 1=1 --" }).Items, Is.Empty);
+        Assert.Throws<VaultFault>(() => Run<JsonElement>("audit.list", new { order = "invalid" }));
+        Assert.Throws<VaultFault>(() => Run<JsonElement>("audit.list", new { result = "invalid" }));
+        Assert.Throws<VaultFault>(() => Run<JsonElement>("audit.list", new { kind = "invalid" }));
+        Assert.Throws<VaultFault>(() => Run<JsonElement>("audit.list", new { search = new string('x', 257) }));
+    }
+    [Test]
+    public void UnexpectedReadFailureIsAuditedWithoutExceptionDetails() {
+        Run<Bucket>("bucket.create", new { name = "corrupt" });
+        var secret = Run<SecretMetadata>("secret.create", new { bucket = "corrupt", key = "key", value = "private-corruption-value" });
+        using (var connection = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = Path.Combine(directory, "vault.db"), Pooling = false }.ToString())) {
+            connection.Open(); using var command = connection.CreateCommand();
+            command.CommandText = "UPDATE entries SET json=json_set(json,'$.value.ciphertext','invalid-ciphertext')"; command.ExecuteNonQuery();
+        }
+        Assert.Catch(() => Run<Secret>("secret.read", new { bucket = "corrupt", key = "key" }));
+        var entry = Run<Page<JsonElement>>("audit.list", new { }).Items.Single(e => e.GetProperty("operation").GetString() == "secret.read");
+        Assert.That(entry.GetProperty("result").GetString(), Is.EqualTo("unavailable"));
+        Assert.That(entry.GetProperty("secretId").GetString(), Is.EqualTo(secret.Id));
+        Assert.That(entry.GetProperty("details").GetProperty("resources").GetArrayLength(), Is.Zero);
+        Assert.That(entry.GetRawText(), Does.Not.Contain("invalid-ciphertext").And.Not.Contain("private-corruption-value"));
+    }
+    [Test]
+    public void LargeAuditReadsPreserveAllObjectsAndFitTransportPages() {
+        Run<Bucket>("bucket.create", new { name = "bulk" });
+        for (var i = 0; i < 205; i++) Run<SecretMetadata>("secret.create", new { bucket = "bulk", key = new string('k', 120) + i, value = "" });
+        string? cursor = null;
+        for (var i = 0; i < 30; i++) Run<BucketSnapshot>("bucket.read", new { bucket = "bulk" });
+        var entries = new List<JsonElement>();
+        do {
+            var page = Run<Page<JsonElement>>("audit.list", new { cursor, limit = 200 });
+            Assert.That(Encoding.UTF8.GetByteCount(JsonSerializer.Serialize(page, Wire.Json)), Is.LessThan(Wire.MaxPlaintext - 2048));
+            entries.AddRange(page.Items); cursor = page.NextCursor;
+        } while (cursor is not null);
+        var reads = entries.Where(e => e.GetProperty("operation").GetString() == "bucket.read").GroupBy(e => e.GetProperty("requestId").GetString()).ToArray();
+        Assert.That(reads, Has.Length.EqualTo(30));
+        foreach (var read in reads) {
+            Assert.That(read.SelectMany(e => e.GetProperty("details").GetProperty("resources").EnumerateArray()).Count(), Is.EqualTo(205));
+            Assert.That(read.All(e => e.GetProperty("details").GetProperty("returnedCount").GetInt32() == 205), Is.True);
+        }
+    }
+    [Test]
     public void LimitsAndPaginationDoNotLeakValues() {
         Run<Bucket>("bucket.create", new { name = "qa" });
         for (var i = 0; i < 3; i++) Run<SecretMetadata>("secret.create", new { bucket = "qa", key = "key" + i, value = "private-value" });

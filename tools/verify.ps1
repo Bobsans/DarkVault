@@ -30,6 +30,7 @@ $artifacts = Join-Path $root 'artifacts'
 New-Item -ItemType Directory -Force -Path $artifacts | Out-Null
 $oldAcceptance = $env:DARKVAULT_ACCEPTANCE
 $oldData, $oldUrls, $oldCertificate = $env:DARKVAULT_DATA, $env:ASPNETCORE_URLS, $env:Kestrel__Certificates__Default__Path
+$oldIpQuota, $oldPrincipalQuota = $env:Security__RateLimits__Ip, $env:Security__RateLimits__Principal
 $hostProcess = $null
 $started = $null
 $descriptor = Join-Path $root '.local/acceptance.json'
@@ -97,6 +98,10 @@ try {
         RedirectStandardOutput = (Join-Path $artifacts 'acceptance-host.log')
         RedirectStandardError = (Join-Path $artifacts 'acceptance-host-error.log')
     }
+    # All SDKs and the browser share one loopback source in this burst workload.
+    # Dedicated security tests above verify production quotas and rejection paths.
+    $env:Security__RateLimits__Ip = '2000'
+    $env:Security__RateLimits__Principal = '2000'
     if ($IsWindows) { $start.WindowStyle = 'Hidden' }
     $started = [DateTime]::UtcNow
     if ($NativeAot) {
@@ -168,5 +173,6 @@ try {
     }
     $env:DARKVAULT_ACCEPTANCE = $oldAcceptance
     $env:DARKVAULT_DATA, $env:ASPNETCORE_URLS, $env:Kestrel__Certificates__Default__Path = $oldData, $oldUrls, $oldCertificate
+    $env:Security__RateLimits__Ip, $env:Security__RateLimits__Principal = $oldIpQuota, $oldPrincipalQuota
     Pop-Location
 }

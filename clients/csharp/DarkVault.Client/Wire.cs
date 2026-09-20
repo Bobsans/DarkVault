@@ -136,9 +136,11 @@ public sealed record VaultRequest(int V, string RequestId, DateTimeOffset Issued
 public sealed record VaultError(string Code, string Message);
 public sealed record VaultResponse(int V, string RequestId, string ServerId, string Audience, string Operation, int Status, JsonElement? Data, VaultError? Error);
 public sealed record Bucket(string Id, string Name, string Description, long Revision, DateTimeOffset CreatedAt, DateTimeOffset UpdatedAt);
-public sealed record SecretMetadata(string Id, string BucketId, string Key, long Revision, DateTimeOffset CreatedAt, DateTimeOffset UpdatedAt);
-public sealed record Secret(string Id, string BucketId, string Key, long Revision, DateTimeOffset CreatedAt, DateTimeOffset UpdatedAt, string Value);
-public sealed record BucketSnapshot(string BucketId, long Revision, Dictionary<string, string?> Secrets);
+public sealed record SecretMetadata(string Id, string BucketId, string Key, long Revision, DateTimeOffset CreatedAt, DateTimeOffset UpdatedAt, string Type = "string");
+public sealed record Secret(string Id, string BucketId, string Key, long Revision, DateTimeOffset CreatedAt, DateTimeOffset UpdatedAt, string Value, string Type = "string") {
+    public JsonElement GetTypedValue() => SecretValues.Parse(Value, Type);
+}
+public sealed record BucketSnapshot(string BucketId, long Revision, Dictionary<string, string?> Secrets, Dictionary<string, string>? Types = null);
 public sealed record Page<T>(IReadOnlyList<T> Items, string? NextCursor);
 public sealed record TokenInfo(string Id, string Name, string[] Scopes, string[] BucketIds, bool AllBuckets, string[] CreatableBucketNames, DateTimeOffset? ExpiresAt);
 public sealed class DarkVaultException(string code, int status, string? requestId = null) : Exception($"DarkVault request failed ({code}).") {

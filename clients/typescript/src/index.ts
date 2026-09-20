@@ -1,15 +1,18 @@
 import { encryptRequest, decryptResponse, parseStrict, readBounded } from './protocol.js';
 import { DarkVaultError } from './errors.js';
+import { encodeScalar, parseScalar, typedSecrets, buildConfiguration } from './configuration.js';
+import type { SecretType, SecretScalar, Configuration } from './configuration.js';
+export * from './configuration.js';
 export { DarkVaultError } from './errors.js';
 
 export interface Bucket {
     id: string; name: string; description: string; revision: number; createdAt: string; updatedAt: string;
 }
 export interface SecretMetadata {
-    id: string; bucketId: string; key: string; revision: number; createdAt: string; updatedAt: string;
+    id: string; bucketId: string; key: string; revision: number; createdAt: string; updatedAt: string; type?: SecretType;
 }
 export interface Secret extends SecretMetadata { value: string }
-export interface BucketSnapshot { bucketId: string; revision: number; secrets: Record<string, string> }
+export interface BucketSnapshot { bucketId: string; revision: number; secrets: Record<string, string>; types?: Record<string, SecretType> }
 export interface Page<T> { items: T[]; nextCursor: string | null }
 export interface TokenInfo {
     id: string; name: string; scopes: string[]; bucketIds: string[]; allBuckets: boolean;
@@ -94,13 +97,16 @@ export class DarkVaultClient {
     listBuckets(cursor: string | null = null, limit = 100, signal?: AbortSignal): Promise<Page<Bucket>> { return this.execute('bucket.list', { cursor, limit: pageLimit(limit) }, signal); }
     readBucketSnapshot(bucket: string, signal?: AbortSignal): Promise<BucketSnapshot> { return this.execute('bucket.read', { bucket }, signal); }
     async readBucket(bucket: string, signal?: AbortSignal): Promise<Record<string, string>> { return (await this.readBucketSnapshot(bucket, signal)).secrets; }
+    async readTypedBucket(bucket: string, signal?: AbortSignal): Promise<Record<string, SecretScalar>> { return typedSecrets(await this.readBucketSnapshot(bucket, signal)); }
+    async readConfiguration(bucket: string, nested = true, signal?: AbortSignal): Promise<Configuration> { return buildConfiguration(await this.readTypedBucket(bucket, signal), nested); }
     updateBucket(bucket: string, description: string, expectedRevision: number, signal?: AbortSignal): Promise<Bucket> { return this.execute('bucket.update', { bucket, description, expectedRevision: revision(expectedRevision) }, signal); }
     async deleteBucket(bucket: string, expectedRevision: number, recursive = false, signal?: AbortSignal): Promise<void> { await this.execute('bucket.delete', { bucket, expectedRevision: revision(expectedRevision), recursive }, signal); }
-    addSecret(bucket: string, key: string, value: string, signal?: AbortSignal): Promise<SecretMetadata> { return this.execute('secret.create', { bucket, key, value }, signal); }
+    addSecret(bucket: string, key: string, value: SecretScalar, signal?: AbortSignal): Promise<SecretMetadata> { return this.execute('secret.create', { bucket, key, ...encodeScalar(value) }, signal); }
     readSecret(bucket: string, key: string, signal?: AbortSignal): Promise<Secret> { return this.execute('secret.read', { bucket, key }, signal); }
+    async readTypedSecret(bucket: string, key: string, signal?: AbortSignal): Promise<Omit<Secret, 'value'> & { value: SecretScalar }> { const secret = await this.readSecret(bucket, key, signal); return { ...secret, value: parseScalar(secret.value, secret.type) }; }
     listSecrets(bucket: string, cursor: string | null = null, limit = 100, signal?: AbortSignal): Promise<Page<SecretMetadata>> { return this.execute('secret.list', { bucket, cursor, limit: pageLimit(limit) }, signal); }
-    updateSecret(bucket: string, key: string, value: string, expectedRevision: number, signal?: AbortSignal): Promise<SecretMetadata> { return this.execute('secret.update', { bucket, key, value, expectedRevision: revision(expectedRevision) }, signal); }
-    setSecret(bucket: string, key: string, value: string, expectedRevision = 0, signal?: AbortSignal): Promise<SecretMetadata> { return this.execute('secret.set', { bucket, key, value, expectedRevision: revision(expectedRevision) }, signal); }
+    updateSecret(bucket: string, key: string, value: SecretScalar, expectedRevision: number, signal?: AbortSignal): Promise<SecretMetadata> { return this.execute('secret.update', { bucket, key, ...encodeScalar(value), expectedRevision: revision(expectedRevision) }, signal); }
+    setSecret(bucket: string, key: string, value: SecretScalar, expectedRevision = 0, signal?: AbortSignal): Promise<SecretMetadata> { return this.execute('secret.set', { bucket, key, ...encodeScalar(value), expectedRevision: revision(expectedRevision) }, signal); }
     async deleteSecret(bucket: string, key: string, expectedRevision: number, signal?: AbortSignal): Promise<void> { await this.execute('secret.delete', { bucket, key, expectedRevision: revision(expectedRevision) }, signal); }
     getTokenInfo(signal?: AbortSignal): Promise<TokenInfo> { return this.execute('token.info', {}, signal); }
 }

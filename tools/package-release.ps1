@@ -60,7 +60,7 @@ try {
     [IO.File]::WriteAllText($pythonProject, $pythonText, [Text.UTF8Encoding]::new($false))
     python -m build clients/python --outdir $assets
 
-    tar -czf (Join-Path $assets "darkvault-go-$Tag.tar.gz") -C clients/go LICENSE README.md go.mod go.sum client.go operations.go client_test.go operations_test.go testdata -C $assets release.json
+    tar -czf (Join-Path $assets "darkvault-go-$Tag.tar.gz") -C clients/go LICENSE README.md go.mod go.sum client.go operations.go configuration.go client_test.go operations_test.go configuration_test.go testdata -C $assets release.json
 
     pnpm --dir clients/typescript install --frozen-lockfile
     $typescriptPackage = [Text.Encoding]::UTF8.GetString($originalTypescriptProject) | ConvertFrom-Json
