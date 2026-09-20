@@ -15,7 +15,7 @@
 
   <ItemGroup>
     <ProjectReference Include="../../clients/csharp/DarkVault.Client/DarkVault.Client.csproj" />
-    <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.11" />
+    <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.12" />
   </ItemGroup>
 
   <Target Name="BuildAdmin" BeforeTargets="AssignTargetPaths" Condition="'$(DesignTimeBuild)' != 'true'">
