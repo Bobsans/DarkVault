@@ -4,9 +4,13 @@
   "description": "Typed DarkVault HTTPS/JWE client",
   "type": "module",
   "license": "MIT",
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org"
+  },
   "repository": {
     "type": "git",
-    "url": "https://github.com/Bobsans/DarkVault.git",
+    "url": "git+https://github.com/Bobsans/DarkVault.git",
     "directory": "clients/typescript"
   },
   "engines": {

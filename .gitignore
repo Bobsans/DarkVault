@@ -13,6 +13,7 @@ Thumbs.db
 bin/
 obj/
 /artifacts/
+__pycache__/
 
 # Local secrets, certificates, and databases
 /.local/
@@ -34,7 +35,9 @@ keyring.json
 server.lock
 
 # Admin frontend dependencies and test output
-/server/DarkVault.Server/Web/node_modules/
-/server/DarkVault.Server/Web/.pnpm-store/
-/server/DarkVault.Server/Web/playwright-report/
-/server/DarkVault.Server/Web/test-results/
+/admin/node_modules/
+/admin/.pnpm-store/
+/admin/playwright-report/
+/admin/test-results/
+
+/admin/dist/

@@ -7,14 +7,25 @@
     <Nullable>enable</Nullable>
     <LangVersion>12</LangVersion>
     <NuGetAuditMode>all</NuGetAuditMode>
-    <DefaultItemExcludes>$(DefaultItemExcludes);Web/node_modules/**</DefaultItemExcludes>
+    <IsAotCompatible>true</IsAotCompatible>
+    <EnableRequestDelegateGenerator>true</EnableRequestDelegateGenerator>
+    <JsonSerializerIsReflectionEnabledByDefault>false</JsonSerializerIsReflectionEnabledByDefault>
+    <AdminDirectory>$(MSBuildProjectDirectory)/../../admin</AdminDirectory>
   </PropertyGroup>
 
   <ItemGroup>
-    <Content Update="wwwroot/**" CopyToOutputDirectory="PreserveNewest" />
-    <Content Remove="Web/**" />
     <ProjectReference Include="../../clients/csharp/DarkVault.Client/DarkVault.Client.csproj" />
     <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.11" />
   </ItemGroup>
+
+  <Target Name="BuildAdmin" BeforeTargets="AssignTargetPaths" Condition="'$(DesignTimeBuild)' != 'true'">
+    <Exec Command="pnpm --dir &quot;$(MSBuildProjectDirectory)/../../clients/typescript&quot; build" />
+    <Exec Command="pnpm build" WorkingDirectory="$(AdminDirectory)" />
+    <ItemGroup>
+      <Content Include="$(AdminDirectory)/dist/index.html" Link="wwwroot/index.html" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+      <Content Include="$(AdminDirectory)/dist/app.js" Link="wwwroot/app.js" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+      <Content Include="$(AdminDirectory)/dist/style.css" Link="wwwroot/style.css" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    </ItemGroup>
+  </Target>
 
 </Project>
