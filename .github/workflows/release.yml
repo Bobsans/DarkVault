@@ -69,7 +69,7 @@ jobs:
         run: ./tools/package-native-server.ps1 -Tag $env:RELEASE_TAG -Runtime '${{ matrix.runtime }}'
       - name: Preserve native server archive
         if: startsWith(github.ref, 'refs/tags/v')
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: native-server-${{ matrix.runtime }}
           if-no-files-found: error
@@ -137,7 +137,7 @@ jobs:
       - name: Verify release versions and checksums
         run: python tools/check-release.py "artifacts/releases/$env:RELEASE_TAG/assets" $env:RELEASE_TAG (git rev-parse HEAD)
       - name: Preserve verified registry packages
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: registry-packages
           if-no-files-found: error
