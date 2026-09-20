@@ -10,6 +10,15 @@ param(
 $ErrorActionPreference = 'Stop'
 $PSNativeCommandUseErrorActionPreference = $true
 $root = Split-Path $PSScriptRoot -Parent
+$testProjects = @(
+    'server/DarkVault.Server.Tests/DarkVault.Server.Tests.csproj',
+    'clients/csharp/DarkVault.Client.Tests/DarkVault.Client.Tests.csproj'
+)
+$productProjects = @(
+    'server/DarkVault.Server/DarkVault.Server.csproj',
+    'clients/csharp/DarkVault.Client/DarkVault.Client.csproj',
+    'clients/csharp/DarkVault.Extensions.Configuration/DarkVault.Extensions.Configuration.csproj'
+)
 if ($ReleaseTag -and (!$NativeAot -or $ReleaseTag -cnotmatch '^v(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$')) { throw 'ReleaseTag requires NativeAot and a vMAJOR.MINOR.PATCH tag.' }
 if ($NativeAot) {
     $platform = if ($IsWindows) { 'win' } elseif ($IsMacOS) { 'osx' } else { 'linux' }
@@ -44,8 +53,12 @@ try {
         & $Node --test protocol.test.js
         if (!$SkipInstall) { & $Node node_modules/@playwright/test/cli.js install --with-deps chromium }
     } finally { Pop-Location }
-    dotnet build DarkVault.sln -c Release --disable-build-servers -m:1 -warnaserror
-    dotnet format whitespace DarkVault.sln --no-restore --verify-no-changes
+    foreach ($project in $testProjects) {
+        dotnet build $project -c Release --disable-build-servers -m:1 -warnaserror
+    }
+    foreach ($project in ($productProjects + $testProjects)) {
+        dotnet format whitespace $project --no-restore --verify-no-changes
+    }
     dotnet build tests/AcceptanceHost/AcceptanceHost.csproj -c Release --disable-build-servers -m:1 -warnaserror
     if ((Get-FileHash tests/fixtures/jwe.json).Hash -ne (Get-FileHash clients/go/testdata/jwe.json).Hash) { throw 'Go SDK fixture differs from the shared protocol fixture.' }
     Push-Location clients/go
@@ -61,7 +74,10 @@ try {
         go vet ./...
         go mod verify
     } finally { Pop-Location }
-    dotnet test DarkVault.sln -c Release --no-build --logger 'trx;LogFilePrefix=tests' --results-directory artifacts/test-results
+    foreach ($project in $testProjects) {
+        $testName = [IO.Path]::GetFileNameWithoutExtension($project)
+        dotnet test $project -c Release --no-build --logger "trx;LogFilePrefix=$testName" --results-directory artifacts/test-results
+    }
     if ($NativeAot) {
         $versionProperties = @()
         if ($ReleaseTag) {

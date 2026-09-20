@@ -27,14 +27,14 @@ its configuration through a native SDK or a single CLI command.
 
 ## Choose your client
 
-| Client | Install | User guide |
-| --- | --- | --- |
-| C# / .NET 10 | `dotnet add package DarkVault.Client` | [C# SDK](clients/csharp/DarkVault.Client/README.md) |
-| .NET configuration | `dotnet add package DarkVault.Extensions.Configuration` | [Configuration provider](clients/csharp/DarkVault.Extensions.Configuration/README.md) |
-| Python 3.11+ | `python -m pip install darkvault-client` | [Python SDK](clients/python/README.md) |
-| Go 1.25+ | `go get github.com/Bobsans/DarkVault/clients/go@latest` | [Go SDK](clients/go/README.md) |
-| TypeScript / Node.js 22+ | `npm install @darkvault/client` | [TypeScript SDK](clients/typescript/README.md) |
-| Command line | Download the CLI for your OS | [CLI guide](cli/README.md) |
+| Client                   | Install                                                 | User guide                                                                            |
+|--------------------------|---------------------------------------------------------|---------------------------------------------------------------------------------------|
+| C# / .NET 10             | `dotnet add package DarkVault.Client`                   | [C# SDK](clients/csharp/DarkVault.Client/README.md)                                   |
+| .NET configuration       | `dotnet add package DarkVault.Extensions.Configuration` | [Configuration provider](clients/csharp/DarkVault.Extensions.Configuration/README.md) |
+| Python 3.11+             | `python -m pip install darkvault-client`                | [Python SDK](clients/python/README.md)                                                |
+| Go 1.25+                 | `go get github.com/Bobsans/DarkVault/clients/go@latest` | [Go SDK](clients/go/README.md)                                                        |
+| TypeScript / Node.js 22+ | `npm install @darkvault/client`                         | [TypeScript SDK](clients/typescript/README.md)                                        |
+| Command line             | Download the CLI for your OS                            | [CLI guide](cli/README.md)                                                            |
 
 See [GitHub Releases](https://github.com/Bobsans/DarkVault/releases) for binaries and
 package archives. Registry badges reflect each registry independently; packages

@@ -12,14 +12,14 @@ executable, SQLite и SPA упаковываются без пересборки
 проверок, скачивает архивы текущего workflow run и добавляет CLI/SDK и контрольные
 суммы. Отсутствующий RID, другая версия/SHA или неверная архитектура останавливают выпуск.
 
-| Компонент | Площадка | Имя |
-| --- | --- | --- |
-| Python SDK | PyPI | `darkvault-client` (импорт `darkvault`) |
-| TypeScript SDK | npm | `@darkvault/client` |
-| C# SDK | NuGet.org | `DarkVault.Client` |
-| .NET configuration provider | NuGet.org | `DarkVault.Extensions.Configuration` |
-| Go SDK | GitHub / Go module proxy | `github.com/Bobsans/DarkVault/clients/go` |
-| Сервер и CLI | GitHub Releases | Архивы для Linux, Windows и macOS, x64/ARM64 |
+| Компонент                   | Площадка                 | Имя                                          |
+|-----------------------------|--------------------------|----------------------------------------------|
+| Python SDK                  | PyPI                     | `darkvault-client` (импорт `darkvault`)      |
+| TypeScript SDK              | npm                      | `@darkvault/client`                          |
+| C# SDK                      | NuGet.org                | `DarkVault.Client`                           |
+| .NET configuration provider | NuGet.org                | `DarkVault.Extensions.Configuration`         |
+| Go SDK                      | GitHub / Go module proxy | `github.com/Bobsans/DarkVault/clients/go`    |
+| Сервер и CLI                | GitHub Releases          | Архивы для Linux, Windows и macOS, x64/ARM64 |
 
 Пакеты собираются один раз, проверяются `tools/check-release.py`, сохраняются
 в artifact `registry-packages` и передаются jobs публикации без пересборки.
@@ -48,13 +48,13 @@ Job создания GitHub Release использует штатный `GITHUB_
 Для нового проекта откройте [Publishing](https://pypi.org/manage/account/publishing/)
 и добавьте pending publisher:
 
-| Поле | Значение |
-| --- | --- |
+| Поле              | Значение           |
+|-------------------|--------------------|
 | PyPI Project Name | `darkvault-client` |
-| Owner | `Bobsans` |
-| Repository name | `DarkVault` |
-| Workflow name | `release.yml` |
-| Environment name | `release` |
+| Owner             | `Bobsans`          |
+| Repository name   | `DarkVault`        |
+| Workflow name     | `release.yml`      |
+| Environment name  | `release`          |
 
 Имя `darkvault` здесь неверно: оно не совпадает с `project.name` Python-пакета.
 Pending publisher создаст `darkvault-client` при первой успешной публикации,
@@ -119,13 +119,13 @@ npm publish ./artifacts/npm-bootstrap/darkvault-client-1.0.0.tgz --access public
 
 Теперь откройте `@darkvault/client` → Settings → Trusted publishing → GitHub Actions:
 
-| Поле | Значение |
-| --- | --- |
-| Organization or user | `Bobsans` |
-| Repository | `DarkVault` |
-| Workflow filename | `release.yml` |
-| Environment | `release` |
-| Allowed actions | Разрешить `npm publish` |
+| Поле                 | Значение                |
+|----------------------|-------------------------|
+| Organization or user | `Bobsans`               |
+| Repository           | `DarkVault`             |
+| Workflow filename    | `release.yml`           |
+| Environment          | `release`               |
+| Allowed actions      | Разрешить `npm publish` |
 
 Одного разрешения `npm stage publish` недостаточно: workflow публикует напрямую.
 Вернитесь в GitHub Actions и выберите **Re-run failed jobs**. npm job проверит

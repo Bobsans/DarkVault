@@ -29,15 +29,15 @@ serverTime используется для диагностики, не для �
 
 Фиксированный криптографический профиль:
 
-| Параметр | Значение |
-| --- | --- |
-| Формат | JWE Compact Serialization, пять сегментов |
-| Управление ключом | `alg = ECDH-ES` |
-| Шифрование | `enc = A256GCM` |
-| Кривая | P-256 |
-| Public key | JWK `kty=EC`, `crv=P-256`, `x`, `y`; без `d` |
-| GCM IV / tag | 96 / 128 бит |
-| Кодирование | UTF-8 JSON; binary — base64url без padding |
+| Параметр          | Значение                                     |
+|-------------------|----------------------------------------------|
+| Формат            | JWE Compact Serialization, пять сегментов    |
+| Управление ключом | `alg = ECDH-ES`                              |
+| Шифрование        | `enc = A256GCM`                              |
+| Кривая            | P-256                                        |
+| Public key        | JWK `kty=EC`, `crv=P-256`, `x`, `y`; без `d` |
+| GCM IV / tag      | 96 / 128 бит                                 |
+| Кодирование       | UTF-8 JSON; binary — base64url без padding   |
 
 Применяется стандартная Concat KDF из JWA, не HKDF и не хеширование строки токена.
 Заголовок полностью protected; `alg`, `enc`, `epk`, `kid`, `typ`, `cty` обязательны.
@@ -156,21 +156,21 @@ UUID, даты и имена — строки; revision — целое 0..900719
 с JavaScript, переполнение запрещено. Входные неизвестные поля отклоняются;
 клиенты могут игнорировать дополнительные поля успешного ответа v1.
 
-| operation | parameters | data |
-| --- | --- | --- |
-| `bucket.create` | `name`, `description?` | Bucket |
-| `bucket.get` | `bucket` | Bucket |
-| `bucket.list` | `cursor?`, `limit?` | `items: Bucket[]`, `nextCursor` |
-| `bucket.read` | `bucket` | `bucketId`, `revision`, `secrets` dictionary |
-| `bucket.update` | `bucket`, `description`, `expectedRevision` | Bucket |
-| `bucket.delete` | `bucket`, `expectedRevision`, `recursive?` | `deleted: true` |
-| `secret.create` | `bucket`, `key`, `value` | SecretMetadata |
-| `secret.read` | `bucket`, `key` | SecretMetadata + `value` |
-| `secret.list` | `bucket`, `cursor?`, `limit?` | `items: SecretMetadata[]`, `nextCursor` |
-| `secret.update` | `bucket`, `key`, `value`, `expectedRevision` | SecretMetadata |
-| `secret.set` | `bucket`, `key`, `value`, `expectedRevision` | SecretMetadata |
-| `secret.delete` | `bucket`, `key`, `expectedRevision` | `deleted: true` |
-| `token.info` | empty object | TokenInfo |
+| operation       | parameters                                   | data                                         |
+|-----------------|----------------------------------------------|----------------------------------------------|
+| `bucket.create` | `name`, `description?`                       | Bucket                                       |
+| `bucket.get`    | `bucket`                                     | Bucket                                       |
+| `bucket.list`   | `cursor?`, `limit?`                          | `items: Bucket[]`, `nextCursor`              |
+| `bucket.read`   | `bucket`                                     | `bucketId`, `revision`, `secrets` dictionary |
+| `bucket.update` | `bucket`, `description`, `expectedRevision`  | Bucket                                       |
+| `bucket.delete` | `bucket`, `expectedRevision`, `recursive?`   | `deleted: true`                              |
+| `secret.create` | `bucket`, `key`, `value`                     | SecretMetadata                               |
+| `secret.read`   | `bucket`, `key`                              | SecretMetadata + `value`                     |
+| `secret.list`   | `bucket`, `cursor?`, `limit?`                | `items: SecretMetadata[]`, `nextCursor`      |
+| `secret.update` | `bucket`, `key`, `value`, `expectedRevision` | SecretMetadata                               |
+| `secret.set`    | `bucket`, `key`, `value`, `expectedRevision` | SecretMetadata                               |
+| `secret.delete` | `bucket`, `key`, `expectedRevision`          | `deleted: true`                              |
+| `token.info`    | empty object                                 | TokenInfo                                    |
 
 `bucket` — точное имя, разрешаемое в UUID до проверки ACL; не union имени/ID.
 Bucket: `id`, `name`, `description`, `revision`, `createdAt`, `updatedAt`.
@@ -200,16 +200,16 @@ Revisions берутся из сохраняемого монотонного с
 `status`, `data: null`, `error: { code, message }`.
 message безопасен для пользователя; код стабилен и не зависит от языка текста.
 
-| HTTP | code / условие |
-| --- | --- |
-| 400 | `invalid_request`, `invalid_envelope`, `unsupported_version`, `unknown_key`, `request_expired` |
-| 401 | `unauthorized`: отсутствующий, неверный, истёкший или отозванный токен |
-| 403 | `forbidden`: нет scope для доступного ресурса |
-| 404 | `not_found`: объект отсутствует или бакет недоступен этому токену |
-| 409 | `already_exists`, `revision_conflict`, `bucket_not_empty`, `replay_detected` |
-| 413 | `payload_too_large` |
-| 429 | `rate_limited` + Retry-After |
-| 500/503 | `internal_error` / `unavailable`, без stack trace |
+| HTTP    | code / условие                                                                                 |
+|---------|------------------------------------------------------------------------------------------------|
+| 400     | `invalid_request`, `invalid_envelope`, `unsupported_version`, `unknown_key`, `request_expired` |
+| 401     | `unauthorized`: отсутствующий, неверный, истёкший или отозванный токен                         |
+| 403     | `forbidden`: нет scope для доступного ресурса                                                  |
+| 404     | `not_found`: объект отсутствует или бакет недоступен этому токену                              |
+| 409     | `already_exists`, `revision_conflict`, `bucket_not_empty`, `replay_detected`                   |
+| 413     | `payload_too_large`                                                                            |
+| 429     | `rate_limited` + Retry-After                                                                   |
+| 500/503 | `internal_error` / `unavailable`, без stack trace                                              |
 
 Не раскрывать существование чужих бакетов через различие 403/404. Для create
 конфликт допустимого имени возвращает 409, без владельца и метаданных чужого бакета.

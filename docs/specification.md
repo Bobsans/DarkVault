@@ -111,20 +111,20 @@ pattern = ^dv1_[A-Za-z0-9_-]{60}$
 
 ### Матрица прав
 
-| Операция | Обязательные scopes |
-| --- | --- |
-| `ListBuckets` | `bucket:list` |
-| `GetBucket` — метаданные | `bucket:read` |
-| `ReadBucket` — все значения | `bucket:read` + `secret:read` + `secret:list` |
-| `AddBucket` | `bucket:create` |
-| `UpdateBucket` — описание | `bucket:write` |
-| `DeleteBucket` — пустой | `bucket:delete` |
-| `DeleteBucket(recursive: true)` | `bucket:delete` + `secret:delete` |
-| `ListSecrets` | `secret:list` |
-| `ReadSecret` | `secret:read` |
-| `AddSecret`, `UpdateSecret`, `SetSecret` | `secret:write` |
-| `DeleteSecret` | `secret:delete` |
-| `GetTokenInfo` — собственные права и срок | Любой действующий токен |
+| Операция                                  | Обязательные scopes                           |
+|-------------------------------------------|-----------------------------------------------|
+| `ListBuckets`                             | `bucket:list`                                 |
+| `GetBucket` — метаданные                  | `bucket:read`                                 |
+| `ReadBucket` — все значения               | `bucket:read` + `secret:read` + `secret:list` |
+| `AddBucket`                               | `bucket:create`                               |
+| `UpdateBucket` — описание                 | `bucket:write`                                |
+| `DeleteBucket` — пустой                   | `bucket:delete`                               |
+| `DeleteBucket(recursive: true)`           | `bucket:delete` + `secret:delete`             |
+| `ListSecrets`                             | `secret:list`                                 |
+| `ReadSecret`                              | `secret:read`                                 |
+| `AddSecret`, `UpdateSecret`, `SetSecret`  | `secret:write`                                |
+| `DeleteSecret`                            | `secret:delete`                               |
+| `GetTokenInfo` — собственные права и срок | Любой действующий токен                       |
 
 Добавляется только `bucket:write` для описания. `secret:write` намеренно объединяет
 создание и обновление; отдельные права на них пока не требуются.

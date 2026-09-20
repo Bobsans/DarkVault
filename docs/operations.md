@@ -8,8 +8,8 @@
 ```powershell
 pnpm --dir clients/typescript install --frozen-lockfile
 pnpm --dir admin install --frozen-lockfile
-dotnet build DarkVault.sln -c Release
-dotnet test DarkVault.sln -c Release
+dotnet test server/DarkVault.Server.Tests/DarkVault.Server.Tests.csproj -c Release
+dotnet test clients/csharp/DarkVault.Client.Tests/DarkVault.Client.Tests.csproj -c Release
 dotnet publish server/DarkVault.Server/DarkVault.Server.csproj -c Release -o artifacts/server
 dotnet pack clients/csharp/DarkVault.Client -c Release -o artifacts/packages
 dotnet pack clients/csharp/DarkVault.Extensions.Configuration -c Release -o artifacts/packages
@@ -18,6 +18,7 @@ go build -trimpath -o ../artifacts/cli/darkvault.exe .
 ```
 
 Node 22+ и pnpm 11 нужны для сборки, но не для запуска готового сервера.
+Тестовые проекты собирают сервер и клиентские библиотеки через `ProjectReference`.
 `dotnet build` и `dotnet publish` собирают TypeScript SDK и SPA из `admin/`, затем
 включают HTML, CSS и JavaScript в выходной `wwwroot/`. Библиотеки JOSE входят
 в bundle; CDN и отдельный frontend-сервер не нужны. `admin/dist/` не коммитится.

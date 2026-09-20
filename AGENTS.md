@@ -1,7 +1,7 @@
 # DarkVault
 
 Хранилище секретов: ASP.NET Core и SQLite, административный веб-интерфейс,
-C#, Python, Go и TypeScript SDK, CLI на Go. Основной solution — `DarkVault.sln`.
+C#, Python, Go и TypeScript SDK, CLI на Go. .NET-проекты собираются напрямую через `.csproj`.
 
 ## Структура
 
@@ -51,7 +51,7 @@ C#, Python, Go и TypeScript SDK, CLI на Go. Основной solution — `Da
 - Клиентские библиотеки и их модульные тесты не должны зависеть от серверного проекта.
   Тесты с запуском сервера остаются в `server/DarkVault.Server.Tests/`;
   общая межъязыковая инфраструктура — в `tests/`.
-- При добавлении или переносе .NET-проектов обновляй solution, `ProjectReference`,
+- При добавлении или переносе .NET-проектов обновляй `ProjectReference`,
   относительные пути, скрипты, CI и документацию.
 - Изменения HTTP/JWE-контракта согласуй между сервером, C#, Python, Go и браузером.
   Обновляй `docs/protocol.md` и генератор `tools/generate-contract.py`;
@@ -75,9 +75,10 @@ C#, Python, Go и TypeScript SDK, CLI на Go. Основной solution — `Da
 Команды выполняются из корня репозитория:
 
 ```powershell
-dotnet build DarkVault.sln -c Release --disable-build-servers -m:1 -warnaserror
-dotnet test DarkVault.sln -c Release --no-build
-dotnet format whitespace DarkVault.sln --no-restore --verify-no-changes
+dotnet build server/DarkVault.Server/DarkVault.Server.csproj -c Release --disable-build-servers -m:1 -warnaserror
+dotnet test server/DarkVault.Server.Tests/DarkVault.Server.Tests.csproj -c Release
+dotnet test clients/csharp/DarkVault.Client.Tests/DarkVault.Client.Tests.csproj -c Release
+dotnet format whitespace server/DarkVault.Server/DarkVault.Server.csproj --no-restore --verify-no-changes
 pwsh tools/verify.ps1
 ```
 
@@ -85,7 +86,8 @@ pwsh tools/verify.ps1
 протокола, структуры проектов и взаимодействия компонентов используй `tools/verify.ps1`:
 он проверяет .NET, Go, Python и браузер, затем собирает локальные пакеты.
 `-SkipInstall` подходит при уже установленных зависимостях; подробности — `docs/verification.md`.
-`AcceptanceHost` собирается этим скриптом отдельно от solution.
+Скрипт явно перечисляет .NET-проекты для сборки, тестов и форматирования;
+`AcceptanceHost` собирается отдельно как тестовая инфраструктура.
 
 Не выдавай успешную сборку за успешные тесты или локальную проверку за пройденный CI.
 В результате кратко укажи изменения, выполненные проверки и оставшиеся ограничения.
