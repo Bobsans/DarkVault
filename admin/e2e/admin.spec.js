@@ -43,6 +43,7 @@ test('Admin navigation, audit filters and encrypted CRUD work on desktop and mob
   await expect(page.locator('#bucket-title')).toHaveText(name);
   await page.reload();
   await expect(page.locator('#bucket-title')).toHaveText(name);
+  await expect(page.locator('#page-content')).not.toHaveAttribute('aria-busy', 'true');
   const keyBox = await page.getByLabel('Key', { exact: true }).boundingBox();
   const valueBox = await page.locator('#secret-form textarea').boundingBox();
   expect(Math.abs(keyBox.y - valueBox.y)).toBeLessThan(2);
@@ -112,6 +113,90 @@ test('Admin navigation, audit filters and encrypted CRUD work on desktop and mob
   await page.locator('#token-form').getByLabel('Name', { exact: true }).fill('Payments service');
   await page.getByRole('button', { name: 'Select bucket reader scopes' }).click();
   await page.locator('#token-buckets').getByLabel(name, { exact: true }).check();
+  const expiryInput = page.locator('#token-expiry');
+  let defaultExpiry = await expiryInput.inputValue();
+  const lifetime = page.getByLabel('Expiration', { exact: true });
+  await expect(lifetime).toHaveValue('720');
+  for (const hours of ['24', '168', '720', '2160', '4320']) {
+    await lifetime.selectOption(hours);
+    const difference = await expiryInput.evaluate((input) => new Date(input.value.replace(' ', 'T')).getTime() - Date.now());
+    expect(difference).toBeGreaterThan(Number(hours) * 3600000 - 65000);
+    expect(difference).toBeLessThanOrEqual(Number(hours) * 3600000);
+  }
+  await lifetime.selectOption('choose');
+  await expect(page.locator('#expiry-dialog')).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(lifetime).toHaveValue('4320');
+  await expect(expiryInput).toBeHidden();
+  await lifetime.selectOption('720');
+  defaultExpiry = await expiryInput.inputValue();
+  await lifetime.selectOption('choose');
+  const picker = page.locator('#expiry-dialog');
+  await expect(picker).toBeVisible();
+  await expect(picker.locator('[aria-pressed="true"]')).toBeFocused();
+  while (await picker.getByRole('button', { name: 'Previous month', exact: true }).isEnabled()) {
+    await picker.getByRole('button', { name: 'Previous month', exact: true }).click();
+  }
+  await expect(picker.getByRole('button', { name: 'Previous month', exact: true })).toBeDisabled();
+  // Days outside the server's calendar-year window cannot be selected.
+  const today = await page.evaluate(() => {
+    const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+  });
+  for (const button of await picker.locator('[data-date]').all()) {
+    if ((await button.getAttribute('data-date')) < today) await expect(button).toBeDisabled();
+  }
+  await picker.locator(`[data-date="${today}"]`).click();
+  await page.getByLabel('Time (local)', { exact: true }).fill('00:00');
+  await picker.getByRole('button', { name: 'Apply date', exact: true }).click();
+  await expect(page.locator('#expiry-picker-error')).toHaveText('Expiry must be in the future.');
+  await expect(expiryInput).toHaveValue(defaultExpiry);
+  let months = 0;
+  while (await picker.getByRole('button', { name: 'Next month', exact: true }).isEnabled()) {
+    expect(months++).toBeLessThan(13);
+    await picker.getByRole('button', { name: 'Next month', exact: true }).click();
+  }
+  const maximumDay = await page.evaluate(() => {
+    const d = new Date(); const month = d.getUTCMonth(); d.setUTCFullYear(d.getUTCFullYear()+1); if (d.getUTCMonth() !== month) d.setUTCDate(0); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+  });
+  for (const button of await picker.locator('[data-date]').all()) {
+    if ((await button.getAttribute('data-date')) > maximumDay) await expect(button).toBeDisabled();
+  }
+  await page.keyboard.press('Escape');
+  await expect(picker).toBeHidden();
+  await expect(expiryInput).toHaveValue(defaultExpiry);
+  await expect(lifetime).toHaveValue('720');
+  await expect(lifetime).toBeFocused();
+  await lifetime.selectOption('choose');
+  const selectedDay = picker.locator('[aria-pressed="true"]');
+  await selectedDay.press('Enter');
+  await page.getByLabel('Time (local)', { exact: true }).fill('13:45');
+  await page.screenshot({ path: 'test-results/admin-expiry-calendar.png' });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect(picker).toBeInViewport();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+  await page.screenshot({ path: 'test-results/admin-expiry-mobile.png' });
+  await picker.getByRole('button', { name: 'Apply date', exact: true }).click();
+  await expect(picker).toBeHidden();
+  await expect(expiryInput).toHaveValue(defaultExpiry.slice(0, 10) + ' 13:45');
+  await expect(page.locator('#expiry-error')).toBeHidden();
+  await expect(lifetime).toHaveValue('custom');
+  await expect(lifetime.locator('option:checked')).toHaveText(/13:45|1:45 PM/);
+  await page.screenshot({ path: 'test-results/admin-expiration-custom.png' });
+  await lifetime.selectOption('choose');
+  await expect(picker).toBeVisible();
+  await picker.getByRole('button', { name: 'Cancel', exact: true }).click();
+  await expect(lifetime).toHaveValue('custom');
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await lifetime.selectOption('year');
+  const yearlyExpiry = await expiryInput.inputValue();
+  const yearlyDuration = await expiryInput.evaluate(input => new Date(input.value.replace(' ', 'T')).getTime() - Date.now());
+  expect(yearlyDuration).toBeGreaterThan(365 * 86400000 - 65000);
+  expect(yearlyDuration).toBeLessThanOrEqual(366 * 86400000);
+  await expect(lifetime.locator('option:checked')).toHaveText(/^1 year \(/);
+  await lifetime.click();
+  await page.screenshot({ path: 'test-results/admin-expiration-menu.png' });
+  await page.keyboard.press('Escape');
+  await page.screenshot({ path: 'test-results/admin-token-presets.png' });
   await page.getByRole('button', { name: 'Create token', exact: true }).click();
   await expect(page.locator('#value-text')).toHaveValue(/^dv1_[A-Za-z0-9_-]{60}$/);
   await expect(page.locator('#value-type-label')).toBeHidden();
@@ -120,6 +205,8 @@ test('Admin navigation, audit filters and encrypted CRUD work on desktop and mob
   const tokenRow = page.locator('#token-list article').filter({ hasText: 'Payments service' });
   page.once('dialog', dialog => dialog.accept()); await tokenRow.getByRole('button', { name: 'Revoke', exact: true }).click();
   await expect(tokenRow).toContainText('Revoked');
+  const formattedExpiry = await page.evaluate(value => new Date(value.replace(' ', 'T')).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' }), yearlyExpiry);
+  await expect(tokenRow).toContainText(formattedExpiry);
   await page.screenshot({ path: 'test-results/admin-tokens.png' });
 
   await nav.getByRole('link', { name: 'Activity logs', exact: true }).click();

@@ -30,3 +30,18 @@ test('Bind a response to its request',async()=>{
   assert.deepEqual(await decryptResponse(compact,request,200),{items:[]});
   await assert.rejects(decryptResponse(compact,request,201));
 });
+
+test('Token maximum uses a UTC calendar year, including leap days', async () => {
+  const { build } = await import('esbuild');
+  const { outputFiles } = await build({ entryPoints: ['src/expiry.ts'], bundle: true, format: 'esm', write: false });
+  const { nextYear } = await import('data:text/javascript;base64,' + Buffer.from(outputFiles[0].text).toString('base64'));
+  for (const [start, expected] of [
+    ['2028-02-29T13:45:12.123Z', '2029-02-28T13:45:12.123Z'],
+    ['2027-03-01T10:20:00.000Z', '2028-03-01T10:20:00.000Z'],
+    ['2026-12-31T23:59:00.000Z', '2027-12-31T23:59:00.000Z']
+  ]) {
+    const now = new Date(start);
+    assert.equal(nextYear(now).toISOString(), expected);
+    assert.equal(now.toISOString(), start);
+  }
+});

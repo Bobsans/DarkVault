@@ -3261,7 +3261,7 @@
                     "type": "null"
                   }
                 ],
-                "description": "Omitted or null: 30 days. Explicit expiry must be in the future and within 90 days."
+                "description": "Omitted or null: 30 days. Explicit expiry must be in the future and no later than the same UTC date and time next year (February 29 becomes February 28)."
               }
             },
             "required": [

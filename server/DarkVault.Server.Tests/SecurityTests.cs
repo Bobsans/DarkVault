@@ -111,7 +111,14 @@ public sealed class SecurityTests {
             var issued = JsonSerializer.SerializeToElement(Create(null), Wire.Json);
             var principal = store.Authenticate(issued.GetProperty("token").GetString()!);
             Assert.That(principal.Token!.ExpiresAt, Is.InRange(DateTimeOffset.UtcNow.AddDays(29), DateTimeOffset.UtcNow.AddDays(31)));
-            Assert.Throws<VaultFault>(() => Create(DateTimeOffset.UtcNow.AddDays(91)));
+            var yearlyExpiry = DateTimeOffset.UtcNow.AddYears(1);
+            var yearly = JsonSerializer.SerializeToElement(Create(yearlyExpiry), Wire.Json);
+            var yearlyPrincipal = store.Authenticate(yearly.GetProperty("token").GetString()!);
+            Assert.That(yearlyPrincipal.Token!.ExpiresAt, Is.EqualTo(yearlyExpiry));
+            var listed = JsonSerializer.SerializeToElement(store.Run(new("test", true), "token.list", JsonSerializer.SerializeToElement(new { }), Guid.NewGuid().ToString()), Wire.Json);
+            Assert.That(listed.GetProperty("items").EnumerateArray().Single(t => t.GetProperty("info").GetProperty("id").GetString() == yearlyPrincipal.Id).GetProperty("info").GetProperty("expiresAt").GetDateTimeOffset(), Is.EqualTo(yearlyExpiry));
+            Assert.Throws<VaultFault>(() => Create(DateTimeOffset.UtcNow.AddYears(1).AddMinutes(1)));
+            Assert.Throws<VaultFault>(() => Create(DateTimeOffset.UtcNow.AddMinutes(-1)));
         } finally { Directory.Delete(directory, true); }
     }
 

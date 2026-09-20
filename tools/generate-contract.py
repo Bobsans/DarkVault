@@ -97,7 +97,7 @@ for name in ["options", "register", "verify"]:
 for path in paths.values():
     for operation in path.values():
         operation["responses"]["429"] = {"description": "Application quota or temporary source ban", "headers": {"Retry-After": {"schema": {"type": "integer", "minimum": 1}, "description": "Seconds before retrying; never blindly retry mutations."}}}
-schemas["token.create.Request"]["properties"]["parameters"]["properties"]["expiresAt"]["description"] = "Omitted or null: 30 days. Explicit expiry must be in the future and within 90 days."
+schemas["token.create.Request"]["properties"]["parameters"]["properties"]["expiresAt"]["description"] = "Omitted or null: 30 days. Explicit expiry must be in the future and no later than the same UTC date and time next year (February 29 becomes February 28)."
 document = {"openapi": "3.1.0", "info": {"title": "DarkVault", "version": "1.0.0", "description": "HTTPS is mandatory. See protocol.md for JWE and authorization requirements."}, "paths": paths,
     "components": {"securitySchemes": {"BearerToken": {"type": "http", "scheme": "bearer"}, "AdminSession": {"type": "apiKey", "in": "cookie", "name": "__Host-DarkVault"}, "Csrf": {"type": "apiKey", "in": "header", "name": "X-CSRF-Token"}}, "schemas": schemas}}
 (ROOT / "docs" / "openapi.json").write_text(json.dumps(document, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")

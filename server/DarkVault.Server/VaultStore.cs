@@ -85,7 +85,7 @@ public sealed partial class VaultStore : IDisposable {
     }
     private void SaveToken(TokenRecord token) => Execute("UPDATE tokens SET json=$p0 WHERE id=$p1", ServerJson.Serialize(token), token.Info.Id);
     private static TokenRecord LimitTokenLifetime(TokenRecord token) {
-        var maximum = token.CreatedAt.AddDays(90);
+        var maximum = token.CreatedAt.AddYears(1);
         return token.Info.ExpiresAt is null || token.Info.ExpiresAt > maximum ? token with { Info = token.Info with { ExpiresAt = maximum } } : token;
     }
     public void Reserve(Principal principal, VaultRequest request) {
@@ -332,7 +332,7 @@ public sealed partial class VaultStore : IDisposable {
                 else if (e.ValueKind == JsonValueKind.String && e.TryGetDateTimeOffset(out var dt) && dt.Offset == TimeSpan.Zero) expiry = dt;
                 else throw new VaultFault(400, "invalid_request");
             }
-            if (expiry <= DateTimeOffset.UtcNow || expiry > DateTimeOffset.UtcNow.AddDays(90)) throw new VaultFault(400, "invalid_request");
+            if (expiry <= DateTimeOffset.UtcNow || expiry > DateTimeOffset.UtcNow.AddYears(1)) throw new VaultFault(400, "invalid_request");
             var token = Wire.NewToken();
             var info = new TokenInfo(Guid.NewGuid().ToString(), name, scopes, buckets, all, names, expiry);
             var record = new TokenRecord(info, DateTimeOffset.UtcNow, null, null);

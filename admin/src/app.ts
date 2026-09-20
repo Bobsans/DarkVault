@@ -1,4 +1,5 @@
 import { execute } from './protocol.js';
+import { setupExpiry } from './expiry.js';
 import { buildConfiguration, formatConfiguration, typedSecrets, encodeScalar, parseScalar } from '@darkvault/client';
 import type { Bucket, Secret, SecretMetadata, Page, TokenInfo, BucketSnapshot, SecretType } from '@darkvault/client';
 
@@ -48,7 +49,7 @@ const active = (version: number) => authenticated && version === routeVersion;
 function clearValue() { $('value-dialog').close(); $('value-text').value = ''; editing = null; }
 function clearConfiguration() { configurationSnapshot = null; $('config-output').textContent = ''; $('config-copy').setAttribute('disabled', ''); $('config-download').setAttribute('disabled', ''); }
 function lockWorkspace() {
-    authenticated = false; routeVersion++; clearValue(); clearConfiguration(); bucketMetadata = [];
+    authenticated = false; routeVersion++; clearValue(); tokenExpiry.close(); clearConfiguration(); bucketMetadata = [];
     $('secret-form').reset(); $('password-form').reset();
     for (const id of ['bucket-list', 'secret-list', 'token-list', 'audit-list']) $(id).replaceChildren();
     $('workspace').hidden = true; $('login').hidden = false; $('loading').hidden = true;
@@ -134,7 +135,7 @@ async function navigate(path: string, replace = false) {
     await renderRoute();
 }
 async function renderRoute() {
-    const version = ++routeVersion; clearValue(); clearConfiguration(); $('secret-form').reset(); $('password-form').reset(); status('');
+    const version = ++routeVersion; clearValue(); tokenExpiry.close(); clearConfiguration(); $('secret-form').reset(); $('password-form').reset(); status('');
     if (!authenticated) return;
     const { view, title, bucket } = route();
     for (const name of ['buckets', 'secrets', 'tokens', 'audit', 'password', 'not-found']) $(name + '-view').hidden = name !== view;
@@ -295,11 +296,11 @@ action($('delete-bucket'), 'click', async () => {
     await api('bucket.delete', { bucket: bucket.name, expectedRevision: bucket.revision, recursive: items.length > 0 }); if (active(version)) await navigate('/admin/buckets');
 });
 action($('read-profile'), 'click', () => { for (const c of $('scopes').querySelectorAll('input')) c.checked = ['bucket:read', 'secret:read', 'secret:list'].includes(c.value); });
-const tokenForm = $('token-form'); const expiry = new Date(Date.now() + 30 * 86400000);
-control(tokenForm, 'expiry').value = new Date(expiry.getTime() - expiry.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+const tokenForm = $('token-form'); const tokenExpiry = setupExpiry(tokenForm);
 action(tokenForm, 'submit', async () => {
+    if (!tokenExpiry.validate()) return;
     const version = routeVersion; const form = new FormData(tokenForm);
-    const result = await api<{ token: string }>('token.create', { name: form.get('name'), scopes: form.getAll('scopes'), bucketIds: form.getAll('bucketIds'), allBuckets: form.has('allBuckets'), creatableBucketNames: String(form.get('creatableBucketNames') ?? '').split(',').map(s => s.trim()).filter(Boolean), expiresAt: new Date(String(form.get('expiry'))).toISOString() });
+    const result = await api<{ token: string }>('token.create', { name: form.get('name'), scopes: form.getAll('scopes'), bucketIds: form.getAll('bucketIds'), allBuckets: form.has('allBuckets'), creatableBucketNames: String(form.get('creatableBucketNames') ?? '').split(',').map(s => s.trim()).filter(Boolean), expiresAt: new Date(String(form.get('expiry')).replace(' ', 'T')).toISOString() });
     if (!active(version)) return;
     editing = null; $('value-title').textContent = 'Save your access token'; $('value-help').textContent = 'Shown only once. Store securely; it cannot be recovered.';
     $('value-type-label').hidden = true;
