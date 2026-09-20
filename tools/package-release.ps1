@@ -1,5 +1,6 @@
 param(
-    [Parameter(Mandatory)][string]$Tag
+    [Parameter(Mandatory)][string]$Tag,
+    [Parameter(Mandatory)][string]$ServerAssets
 )
 $ErrorActionPreference = 'Stop'
 $PSNativeCommandUseErrorActionPreference = $true
@@ -14,6 +15,8 @@ if ($env:GITHUB_ACTIONS -eq 'true') {
     if ($env:GITHUB_REF -ne "refs/tags/$Tag" -or $dirty) { throw 'Release requires a clean checkout of the requested tag.' }
     if ((git -C $root rev-parse "$Tag^{commit}") -ne $commit) { throw 'Tag does not match the checkout.' }
 }
+$serverAssetsPath = (Resolve-Path -LiteralPath $ServerAssets).Path
+python (Join-Path $root 'tools/check-release.py') --servers $serverAssetsPath $Tag $commit $dirty.ToString().ToLowerInvariant()
 $major = [int]$version.Split('.')[0]
 $goModule = (Select-String -LiteralPath (Join-Path $root 'clients/go/go.mod') -Pattern '^module (.+)$').Matches[0].Groups[1].Value
 if ($major -ge 2 -and !$goModule.EndsWith("/v$major")) { throw "Go SDK module path must end with /v$major for this major release." }
@@ -30,16 +33,10 @@ $originalTypescriptProject = [IO.File]::ReadAllBytes($typescriptProject)
 $oldGoos, $oldGoarch, $oldCgo = $env:GOOS, $env:GOARCH, $env:CGO_ENABLED
 Push-Location $root
 try {
+    pnpm --dir clients/typescript install --frozen-lockfile
+    Copy-Item -Path (Join-Path $serverAssetsPath '*') -Destination $assets
     foreach ($runtime in @('linux-x64', 'linux-arm64', 'win-x64', 'win-arm64', 'osx-x64', 'osx-arm64')) {
         $platform, $architecture = $runtime.Split('-')
-        $server = Join-Path $output "server/$runtime"
-        dotnet publish server/DarkVault.Server/DarkVault.Server.csproj -c Release -r $runtime --self-contained true -p:Version=$version -p:SourceRevisionId=$commit -p:RepositoryCommit=$commit -o $server --disable-build-servers -warnaserror
-        if ([Diagnostics.FileVersionInfo]::GetVersionInfo((Join-Path $server 'DarkVault.Server.dll')).ProductVersion -ne "$version+$commit") { throw "Wrong server version for $runtime" }
-        Copy-Item LICENSE $server
-        $serverArchive = Join-Path $assets "darkvault-server-$Tag-$runtime"
-        if ($platform -eq 'win') { Compress-Archive -Path "$server/*" -DestinationPath "$serverArchive.zip" }
-        else { tar -czf "$serverArchive.tar.gz" -C $server . }
-
         $env:GOOS = @{ linux = 'linux'; win = 'windows'; osx = 'darwin' }[$platform]
         $env:GOARCH = if ($architecture -eq 'x64') { 'amd64' } else { 'arm64' }
         $env:CGO_ENABLED = '0'

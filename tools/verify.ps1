@@ -2,15 +2,28 @@ param(
     [string]$Node = 'node',
     [string]$Pnpm = 'pnpm',
     [string]$Python = 'python',
-    [switch]$SkipInstall
+    [switch]$SkipInstall,
+    [switch]$NativeAot,
+    [ValidateSet('linux-x64', 'linux-arm64', 'win-x64', 'win-arm64', 'osx-x64', 'osx-arm64')][string]$Runtime,
+    [string]$ReleaseTag
 )
 $ErrorActionPreference = 'Stop'
 $PSNativeCommandUseErrorActionPreference = $true
 $root = Split-Path $PSScriptRoot -Parent
+if ($ReleaseTag -and (!$NativeAot -or $ReleaseTag -cnotmatch '^v(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$')) { throw 'ReleaseTag requires NativeAot and a vMAJOR.MINOR.PATCH tag.' }
+if ($NativeAot) {
+    $platform = if ($IsWindows) { 'win' } elseif ($IsMacOS) { 'osx' } else { 'linux' }
+    $hostRuntime = "$platform-$([Runtime.InteropServices.RuntimeInformation]::OSArchitecture.ToString().ToLowerInvariant())"
+    if (!$Runtime) { $Runtime = $hostRuntime }
+    if ($Runtime -ne $hostRuntime) { throw "Native verification requires a $Runtime host; this host is $hostRuntime." }
+}
 $artifacts = Join-Path $root 'artifacts'
 New-Item -ItemType Directory -Force -Path $artifacts | Out-Null
 $oldAcceptance = $env:DARKVAULT_ACCEPTANCE
+$oldData, $oldUrls, $oldCertificate = $env:DARKVAULT_DATA, $env:ASPNETCORE_URLS, $env:Kestrel__Certificates__Default__Path
 $hostProcess = $null
+$started = $null
+$descriptor = Join-Path $root '.local/acceptance.json'
 Push-Location $root
 try {
     $pythonEnvironment = Join-Path $artifacts 'python-env'
@@ -24,12 +37,12 @@ try {
         & $Pnpm build
         & $Node --test test/client.test.js
     } finally { Pop-Location }
-    Push-Location server/DarkVault.Server/Web
+    Push-Location admin
     try {
         if (!$SkipInstall) { & $Pnpm install --frozen-lockfile }
-        & $Node node_modules/esbuild/bin/esbuild app.js --bundle --format=esm --minify --outfile=../wwwroot/app.js
+        & $Pnpm build
         & $Node --test protocol.test.js
-        if (!$SkipInstall) { & $Node node_modules/@playwright/test/cli.js install chromium }
+        if (!$SkipInstall) { & $Node node_modules/@playwright/test/cli.js install --with-deps chromium }
     } finally { Pop-Location }
     dotnet build DarkVault.sln -c Release --disable-build-servers -m:1 -warnaserror
     dotnet format whitespace DarkVault.sln --no-restore --verify-no-changes
@@ -49,6 +62,17 @@ try {
         go mod verify
     } finally { Pop-Location }
     dotnet test DarkVault.sln -c Release --no-build --logger 'trx;LogFilePrefix=tests' --results-directory artifacts/test-results
+    if ($NativeAot) {
+        $versionProperties = @()
+        if ($ReleaseTag) {
+            $commit = git rev-parse HEAD
+            $versionProperties = @("-p:Version=$($ReleaseTag.Substring(1))", "-p:SourceRevisionId=$commit", "-p:RepositoryCommit=$commit")
+        }
+        $nativeOutput = Join-Path $artifacts "server-aot/$runtime"
+        dotnet publish server/DarkVault.Server/DarkVault.Server.csproj -c Release -r $runtime -p:PublishProfile=NativeAot @versionProperties -o $nativeOutput --disable-build-servers -warnaserror
+        $nativeServer = Join-Path $nativeOutput $(if ($IsWindows) { 'DarkVault.Server.exe' } else { 'DarkVault.Server' })
+        & $nativeServer --version
+    }
     $start = @{
         FilePath = 'dotnet'
         ArgumentList = @(('"' + (Join-Path $root 'tests/AcceptanceHost/bin/Release/net10.0/AcceptanceHost.dll') + '"'), ('"' + $root + '"'))
@@ -59,8 +83,16 @@ try {
     }
     if ($IsWindows) { $start.WindowStyle = 'Hidden' }
     $started = [DateTime]::UtcNow
+    if ($NativeAot) {
+        dotnet tests/AcceptanceHost/bin/Release/net10.0/AcceptanceHost.dll $root --prepare
+        $prepared = Get-Content -LiteralPath $descriptor -Raw | ConvertFrom-Json
+        $env:DARKVAULT_DATA = Split-Path $prepared.tokenFile -Parent
+        $env:ASPNETCORE_URLS = $prepared.url
+        $env:Kestrel__Certificates__Default__Path = Join-Path $env:DARKVAULT_DATA 'server.pfx'
+        $start.FilePath = $nativeServer
+        $start.ArgumentList = @('serve')
+    }
     $hostProcess = Start-Process @start
-    $descriptor = Join-Path $root '.local/acceptance.json'
     $ready = $false
     for ($i = 0; $i -lt 60; $i++) {
         if ($hostProcess.HasExited) { throw 'Acceptance host exited. Inspect artifacts/acceptance-host-error.log.' }
@@ -71,6 +103,7 @@ try {
     }
     if (!$ready) { throw 'Acceptance host did not become ready.' }
     $env:DARKVAULT_ACCEPTANCE = $descriptor
+    if ($NativeAot) { dotnet tests/AcceptanceHost/bin/Release/net10.0/AcceptanceHost.dll $root --check }
     $previousCa = $env:NODE_EXTRA_CA_CERTS
     try {
         $env:NODE_EXTRA_CA_CERTS = (Get-Content -LiteralPath $descriptor -Raw | ConvertFrom-Json).ca
@@ -88,8 +121,16 @@ try {
     if (!$wheel) { throw 'Python wheel was not produced.' }
     & $consumerExecutable -m pip install --force-reinstall $wheel.FullName
     & $consumerExecutable -I -m unittest discover -s clients/python/tests -v
-    Push-Location server/DarkVault.Server/Web
+    Push-Location admin
     try { & $Node node_modules/@playwright/test/cli.js test } finally { Pop-Location }
+    if ($NativeAot) {
+        Stop-Process -Id $hostProcess.Id
+        $hostProcess.WaitForExit()
+        & $nativeServer verify
+        & $nativeServer rotate-data
+        & $nativeServer rotate-transport
+        & $nativeServer verify
+    }
     dotnet publish server/DarkVault.Server/DarkVault.Server.csproj -c Release --no-restore -o artifacts/server
     dotnet pack clients/csharp/DarkVault.Client/DarkVault.Client.csproj -c Release --no-restore -o artifacts/packages
     dotnet pack clients/csharp/DarkVault.Extensions.Configuration/DarkVault.Extensions.Configuration.csproj -c Release --no-restore -o artifacts/packages
@@ -97,7 +138,7 @@ try {
     Write-Output 'Verification completed, including SDK packages. Only temporary test state was used.'
 } finally {
     if ($hostProcess -and !$hostProcess.HasExited) { Stop-Process -Id $hostProcess.Id }
-    if ($hostProcess -and (Test-Path -LiteralPath $descriptor) -and (Get-Item -LiteralPath $descriptor).LastWriteTimeUtc -ge $started) {
+    if ($started -and (Test-Path -LiteralPath $descriptor) -and (Get-Item -LiteralPath $descriptor).LastWriteTimeUtc -ge $started) {
         $testState = Get-Content -LiteralPath $descriptor -Raw | ConvertFrom-Json
         $statePath = [IO.Path]::GetFullPath((Split-Path $testState.tokenFile -Parent))
         $localRoot = [IO.Path]::GetFullPath((Join-Path $root '.local'))
@@ -105,10 +146,11 @@ try {
             throw 'Unexpected acceptance state path; cleanup refused.'
         }
         if ((Get-Item -LiteralPath $statePath -Force).Attributes -band [IO.FileAttributes]::ReparsePoint) { throw 'Unexpected acceptance state link.' }
-        $hostProcess.WaitForExit()
+        if ($hostProcess) { $hostProcess.WaitForExit() }
         Remove-Item -LiteralPath $statePath -Recurse -Force
         Remove-Item -LiteralPath $descriptor -Force
     }
     $env:DARKVAULT_ACCEPTANCE = $oldAcceptance
+    $env:DARKVAULT_DATA, $env:ASPNETCORE_URLS, $env:Kestrel__Certificates__Default__Path = $oldData, $oldUrls, $oldCertificate
     Pop-Location
 }

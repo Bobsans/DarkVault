@@ -1,75 +1,232 @@
 # DarkVault Go SDK
 
-Самостоятельный клиент для Go 1.25+: HTTPS, JWE, бакеты, секреты и информация о токене.
-Модуль не зависит от CLI, Cobra или серверного проекта.
+[![Go Reference](https://pkg.go.dev/badge/github.com/Bobsans/DarkVault/clients/go.svg)](https://pkg.go.dev/github.com/Bobsans/DarkVault/clients/go)
+[![Go](https://img.shields.io/badge/go-1.25%2B-00ADD8)](https://go.dev/)
+[![CI](https://github.com/Bobsans/DarkVault/actions/workflows/release.yml/badge.svg)](https://github.com/Bobsans/DarkVault/actions/workflows/release.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](https://github.com/Bobsans/DarkVault/blob/main/LICENSE)
 
-После публикации версии:
+A standalone Go client with typed bucket, secret, and token operations.
+The module is independent of the CLI, Cobra, and the DarkVault server project.
+
+## Install
+
+Requires Go 1.25+:
 
 ```sh
-go get github.com/Bobsans/DarkVault/clients/go@v1.0.0
+go get github.com/Bobsans/DarkVault/clients/go@latest
 ```
 
+Pin a published version for reproducible builds. Releases use module tags such as
+`clients/go/v1.0.0`; consumers request `@v1.0.0`.
+
+## Quick start
+
 ```go
-package config
+package main
 
 import (
-    "context"
-    "os"
+	"context"
+	"log"
+	"os"
+	"time"
 
-    darkvault "github.com/Bobsans/DarkVault/clients/go"
+	darkvault "github.com/Bobsans/DarkVault/clients/go"
 )
 
-func loadSecrets(ctx context.Context) (map[string]string, error) {
-    client, err := darkvault.New("https://vault.example.com", os.Getenv("DARKVAULT_TOKEN"))
-    if err != nil {
-        return nil, err
-    }
-    return client.ReadBucket(ctx, "app_qa")
+func main() {
+	vault, err := darkvault.New("https://vault.example.com", os.Getenv("DARKVAULT_TOKEN"))
+	if err != nil {
+		log.Fatal("Invalid DarkVault configuration")
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	settings, err := vault.ReadBucket(ctx, "app_prod")
+	if err != nil {
+		log.Fatal("Cannot load DarkVault settings")
+	}
+
+	// Pass to your application; do not log secrets.
+	_ = settings["Database:Url"]
 }
 ```
 
-## API
+## Connection and permissions
 
-- Бакеты: `AddBucket`, `GetBucket`, `ListBuckets`, `ReadBucket`,
-  `ReadBucketSnapshot`, `UpdateBucket`, `DeleteBucket`.
-- Секреты: `AddSecret`, `ReadSecret`, `ListSecrets`, `UpdateSecret`, `SetSecret`, `DeleteSecret`.
-- Токен: `GetTokenInfo`.
-- Низкоуровневый вызов: `Execute(ctx, operation, parameters)` возвращает `json.RawMessage`.
+Use the server's HTTPS origin, for example `https://vault.example.com`, without an
+API path, URL credentials, query, or fragment. Tokens are issued in the DarkVault
+web UI and use the `dv1_` format (64 characters total). Supply the token explicitly
+from a protected source; this SDK does not load CLI configuration.
 
-Все методы принимают `context.Context`. Изменение и удаление требуют актуальную
-`Revision`; `SetSecret` с revision `0` создаёт отсутствующий секрет.
-Параметр `bucket` — точное имя бакета, а не его UUID.
-`ReadBucket` возвращает значения, `ReadBucketSnapshot` — также ID и revision бакета.
-Списки возвращают `Page[T]`: передайте пустой cursor для первой страницы, limit от 1 до 200,
-затем `*page.NextCursor` для следующей; `nil` означает конец списка.
+Bucket arguments are exact names, not UUIDs. Each operation needs its matching
+token scopes and bucket access. Reading an entire bucket needs `bucket:read`,
+`secret:read`, and `secret:list`. Bucket creation additionally depends on the
+token's allowed creation names. Token issuance and revocation are administrative
+operations, not SDK methods.
 
-Серверные ошибки доступны через `errors.As(err, &apiError)` для `*darkvault.APIError`:
-`Code`, `Status`, `RequestID`. Текст ошибки не содержит значений секретов.
+Values are strings. Treat returned secrets as sensitive in-memory data; do not
+log values, Authorization headers, or request bodies. TLS verification must stay
+enabled. JWE uses ECDH-ES/P-256/A256GCM in addition to HTTPS; the server still sees
+plaintext secrets, so this is not a zero-knowledge system.
 
-## Транспорт
+## Required scopes
 
-`New` проверяет HTTPS origin и формат токена. TLS проверяется системным хранилищем
-доверия; редиректы запрещены, в том числе при замене `client.HTTP`.
-Для своего CA настройте `http.Transport.TLSClientConfig.RootCAs`, не отключайте проверку TLS.
-Настраивайте `client.HTTP` до начала использования; не изменяйте поля клиента во время запросов.
+| Operation | Required scopes |
+| --- | --- |
+| List buckets | `bucket:list` |
+| Get bucket metadata | `bucket:read` |
+| Read bucket values | `bucket:read`, `secret:read`, `secret:list` |
+| Create bucket | `bucket:create` |
+| Update bucket description | `bucket:write` |
+| Delete empty bucket | `bucket:delete` |
+| Delete bucket recursively | `bucket:delete`, `secret:delete` |
+| List secret metadata | `secret:list` |
+| Read secret value | `secret:read` |
+| Create, update, or set secret | `secret:write` |
+| Delete secret | `secret:delete` |
+| Inspect own token | Any valid token |
 
-Discovery и запрос используют общий deadline: максимум 30 секунд либо меньший
-`client.HTTP.Timeout` или deadline контекста. Каждый вызов получает текущий ключ сервера.
-Автоматических повторов нет: при сетевой ошибке записи результат может быть неизвестен;
-проверьте состояние перед повтором. SDK не читает конфиг CLI и не сохраняет токен на диск.
+Scopes do not replace bucket grants.
 
-## Разработка и релизы
+## API reference
 
-```sh
-go test ./...
-go vet ./...
+All methods below take `ctx context.Context` as their first argument. They return
+`(Result, error)`; delete methods return only `error`.
+
+| Method (excluding context) | Result |
+| --- | --- |
+| `AddBucket(name, description)` | `Bucket` |
+| `GetBucket(bucket)` | `Bucket` |
+| `ListBuckets(cursor, limit)` | `Page[Bucket]` |
+| `ReadBucket(bucket)` | `map[string]string` |
+| `ReadBucketSnapshot(bucket)` | `BucketSnapshot` |
+| `UpdateBucket(bucket, description, expectedRevision)` | `Bucket` |
+| `DeleteBucket(bucket, expectedRevision, recursive)` | Error only |
+| `AddSecret(bucket, key, value)` | `SecretMetadata` |
+| `ReadSecret(bucket, key)` | `Secret` |
+| `ListSecrets(bucket, cursor, limit)` | `Page[SecretMetadata]` |
+| `UpdateSecret(bucket, key, value, expectedRevision)` | `SecretMetadata` |
+| `SetSecret(bucket, key, value, expectedRevision)` | `SecretMetadata` |
+| `DeleteSecret(bucket, key, expectedRevision)` | Error only |
+| `GetTokenInfo()` | `TokenInfo` |
+| `Execute(operation, parameters)` | `json.RawMessage`; advanced wire API |
+
+Names, keys, values, descriptions, and cursors are strings; revisions are `int64`,
+limits are `int`, and `recursive` is `bool`. Go has no optional method arguments:
+pass `""`, `100`, `0`, or `false` explicitly where appropriate.
+
+- `Bucket`: `ID`, `Name`, `Description`, `Revision`, `CreatedAt`, `UpdatedAt`.
+- `SecretMetadata`: `ID`, `BucketID`, `Key`, `Revision`, `CreatedAt`, `UpdatedAt`.
+- `Secret`: embedded `SecretMetadata` plus `Value`.
+- `BucketSnapshot`: `BucketID`, `Revision`, `Secrets`.
+- `Page[T]`: `Items []T`, `NextCursor *string`.
+- `TokenInfo`: `ID`, `Name`, `Scopes`, `BucketIDs`, `AllBuckets`,
+  `CreatableBucketNames`, `ExpiresAt`.
+
+Timestamps use `time.Time`; token expiry is `*time.Time` and may be nil.
+Secret listings contain metadata, not values.
+
+## Update a secret
+
+Inside a function with the `vault` and `ctx` from above that returns `error`:
+
+```go
+current, err := vault.ReadSecret(ctx, "app_prod", "Feature:Enabled")
+if err != nil {
+	return err
+}
+
+_, err = vault.UpdateSecret(
+	ctx,
+	"app_prod",
+	"Feature:Enabled",
+	"false",
+	current.Revision,
+)
+
+return err
 ```
 
-Для интеграционного теста задайте `DARKVAULT_ACCEPTANCE` путём к descriptor тестового
-HTTPS-сервера. Корневой `tools/verify.ps1` запускает этот сервер и тесты SDK и CLI.
-`testdata/jwe.json` — публичный fixture; проверка сравнивает его с `tests/fixtures/jwe.json`.
+Stale revisions fail with `revision_conflict`. `SetSecret` with revision 0 creates
+only if absent; it is not an unconditional overwrite. Delete operations require a
+current revision; nonempty buckets additionally require `recursive = true`.
+Refresh bucket metadata after changing secrets before deleting the bucket.
 
-CLI использует локальный `replace` на этот модуль, поэтому изменения протокола общие.
-Релизная job прикладывает архив исходников Go SDK и создаёт тег `clients/go/vX.Y.Z`
-на том же коммите, что и основной релиз `vX.Y.Z`. Этот префикс нужен Go для модуля
-в подпапке. До первого релиза установите SDK из локального checkout через `replace`.
+## Pagination
+
+Inside a function returning `error`:
+
+```go
+cursor := ""
+
+for {
+	page, err := vault.ListSecrets(ctx, "app_prod", cursor, 100)
+	if err != nil {
+		return err
+	}
+
+	for _, item := range page.Items {
+		// Process metadata.
+		_ = item.Key
+	}
+
+	if page.NextCursor == nil {
+		break
+	}
+
+	cursor = *page.NextCursor
+}
+
+return nil
+```
+
+Use an empty cursor initially and a limit from 1 to 200. Cursors are opaque and
+belong to the same listing. Each call returns one page.
+
+## Errors, deadlines, and retries
+
+Use `errors.As` to inspect server error metadata:
+
+```go
+var apiError *darkvault.APIError
+
+if errors.As(err, &apiError) {
+	log.Printf(
+		"DarkVault: %s; HTTP %d; request %s",
+		apiError.Code,
+		apiError.Status,
+		apiError.RequestID,
+	)
+}
+```
+
+Import `errors` and use the returned `err`. Not all failures are `APIError`:
+configuration, transport, context, and decoding errors can be ordinary Go errors.
+Common server codes include `unauthorized`, `forbidden`, `not_found`,
+`already_exists`, `revision_conflict`, and `bucket_not_empty`.
+
+Discovery and execution share a deadline of at most 30 seconds, shortened by
+`Client.HTTP.Timeout` or the caller's context. No requests are retried automatically.
+A write interrupted by a network error or cancellation may already have succeeded;
+read current state before retrying.
+
+## HTTP transport and private CAs
+
+`New(server, token)` returns `(*Client, error)` and configures a 30-second
+`http.Client`. Reuse it. Set `Client.HTTP` before requests if a custom transport
+is needed; do not mutate client fields while requests are running.
+The SDK rejects redirects even when a custom HTTP client is supplied.
+
+For a private CA, configure a verifying `http.Transport` with your certificate
+pool in `TLSClientConfig.RootCAs`, preserving existing system roots if needed.
+Never set `InsecureSkipVerify`. Use Go's normal transport lifecycle for connection
+cleanup; the SDK has no `Close` method.
+
+## Local checkout
+
+Before a module version is published, a consuming Go module can use a local
+`replace github.com/Bobsans/DarkVault/clients/go => /path/to/DarkVault/clients/go`.
+Published module versions do not need that replacement.
+
+[DarkVault and server setup](https://github.com/Bobsans/DarkVault#readme) · [API schema](https://github.com/Bobsans/DarkVault/blob/main/docs/openapi.json) · [Issues](https://github.com/Bobsans/DarkVault/issues) · [MIT license](https://github.com/Bobsans/DarkVault/blob/main/LICENSE)

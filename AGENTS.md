@@ -8,9 +8,8 @@ C#, Python, Go и TypeScript SDK, CLI на Go. Основной solution — `Da
 | Путь | Назначение |
 | --- | --- |
 | `server/DarkVault.Server/` | Сервер, хранение, авторизация и HTTP API |
-| `server/DarkVault.Server/Pages/` | Razor-страницы административного интерфейса |
-| `server/DarkVault.Server/Web/` | JavaScript-исходники, зависимости, тесты протокола и browser E2E |
-| `server/DarkVault.Server/wwwroot/` | Статические ресурсы и собранный `app.js` |
+| `admin/` | TypeScript SPA, статическая HTML-оболочка, тесты протокола и browser E2E |
+| `admin/dist/` | Генерируемая сборка SPA; сервер пакует её в выходной `wwwroot/` |
 | `server/DarkVault.Server.Tests/` | Серверные тесты и интеграция SDK с реальным HTTPS-сервером |
 | `clients/csharp/DarkVault.Client/` | C# SDK и реализация протокола |
 | `clients/csharp/DarkVault.Client.Tests/` | Независимые от сервера проверки C#-клиента, JSON и JWE |
@@ -57,9 +56,10 @@ C#, Python, Go и TypeScript SDK, CLI на Go. Основной solution — `Da
 - Изменения HTTP/JWE-контракта согласуй между сервером, C#, Python, Go и браузером.
   Обновляй `docs/protocol.md` и генератор `tools/generate-contract.py`;
   `docs/openapi.json` пересоздавай генератором.
-- Не редактируй собранный `wwwroot/app.js` вручную. После изменения браузерного кода
-  сначала собирай SDK командой `pnpm --dir clients/typescript build`, затем
-  пересобирай bundle из `server/DarkVault.Server/Web/` командой `pnpm build`.
+- Не редактируй `admin/dist/` вручную и не коммить результаты сборки. После изменения
+  браузерного кода сначала собирай SDK командой `pnpm --dir clients/typescript build`,
+  затем SPA командой `pnpm --dir admin build`. Серверные build/publish выполняют обе
+  сборки и пакуют SPA в `wwwroot/`; зависимости SDK и SPA должны быть установлены.
 - Не выводи реальные секреты в чат, логи или аргументы команд. Не коммить токены,
   приватные ключи, сертификаты и базы. Публичный `tests/fixtures/jwe.json` — тестовые данные.
 - Не отключай TLS-проверку и проверки авторизации в рабочем коде. Проверки безопасности,

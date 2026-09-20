@@ -1,0 +1,229 @@
+name: CI and release
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-22.04, runtime: linux-x64, arch: x64, python-arch: x64 }
+          - { os: ubuntu-22.04-arm, runtime: linux-arm64, arch: arm64, python-arch: arm64 }
+          - { os: windows-2025, runtime: win-x64, arch: x64, python-arch: x64 }
+          - { os: windows-11-arm, runtime: win-arm64, arch: arm64, python-arch: x64 }
+          - { os: macos-15-intel, runtime: osx-x64, arch: x64, python-arch: x64 }
+          - { os: macos-15, runtime: osx-arm64, arch: arm64, python-arch: arm64 }
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    env:
+      RELEASE_TAG: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || '' }}
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: '10.0.x'
+          architecture: ${{ matrix.arch }}
+      - uses: actions/setup-go@v7
+        with:
+          go-version: stable
+          architecture: ${{ matrix.arch }}
+          cache-dependency-path: |
+            cli/go.sum
+            clients/go/go.sum
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+          architecture: ${{ matrix.arch }}
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.13'
+          architecture: ${{ matrix.python-arch }}
+          cache: pip
+          cache-dependency-path: clients/python/pyproject.toml
+      - name: Install frontend package manager
+        run: npm install --global pnpm@11
+      - name: Install Linux Native AOT toolchain
+        if: runner.os == 'Linux'
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $true
+          sudo apt-get update
+          sudo apt-get install --yes clang zlib1g-dev
+      - name: Verify Native AOT server, HTTP SDKs, CLI, browser and package artifacts
+        run: ./tools/verify.ps1 -NativeAot -Runtime '${{ matrix.runtime }}' -ReleaseTag $env:RELEASE_TAG
+      - name: Test native release archive validation
+        run: python -m unittest discover -s tools -p 'test_check_release.py'
+      - name: Package tested native server
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: ./tools/package-native-server.ps1 -Tag $env:RELEASE_TAG -Runtime '${{ matrix.runtime }}'
+      - name: Preserve native server archive
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-server-${{ matrix.runtime }}
+          if-no-files-found: error
+          path: artifacts/native-assets/*
+      - name: Test npm publication checks
+        run: node --test tools/publish-npm.test.mjs
+      - name: Audit dependencies
+        run: |
+          $PSNativeCommandUseErrorActionPreference = $true
+          $ErrorActionPreference = "Stop"
+          $audit = dotnet list server/DarkVault.Server/DarkVault.Server.csproj package --vulnerable --include-transitive --format json | ConvertFrom-Json
+          $vulnerable = @($audit.projects.frameworks.topLevelPackages) + @($audit.projects.frameworks.transitivePackages)
+          if (@($vulnerable | Where-Object { $_.vulnerabilities }).Count -ne 0) { throw "Vulnerable NuGet dependencies found" }
+          Push-Location cli
+          try { go run golang.org/x/vuln/cmd/govulncheck@v1.7.0 ./... } finally { Pop-Location }
+          Push-Location clients/go
+          try { go run golang.org/x/vuln/cmd/govulncheck@v1.7.0 ./... } finally { Pop-Location }
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: check
+    environment: release
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write
+    concurrency:
+      group: release-${{ github.ref }}
+      cancel-in-progress: false
+    defaults:
+      run:
+        shell: pwsh
+    env:
+      RELEASE_TAG: ${{ github.ref_name }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: '10.0.x'
+      - uses: actions/setup-go@v7
+        with:
+          go-version: stable
+          cache-dependency-path: |
+            cli/go.sum
+            clients/go/go.sum
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.11'
+      - name: Install Python build tool
+        run: python -m pip install build
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+      - name: Install SDK package manager
+        run: npm install --global pnpm@11
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: native-server-*
+          merge-multiple: true
+          path: artifacts/native-assets
+      - name: Assemble native servers, SDKs and CLI
+        run: ./tools/package-release.ps1 -Tag $env:RELEASE_TAG -ServerAssets artifacts/native-assets
+      - name: Verify release versions and checksums
+        run: python tools/check-release.py "artifacts/releases/$env:RELEASE_TAG/assets" $env:RELEASE_TAG (git rev-parse HEAD)
+      - name: Preserve verified registry packages
+        uses: actions/upload-artifact@v4
+        with:
+          name: registry-packages
+          if-no-files-found: error
+          path: |
+            artifacts/releases/${{ github.ref_name }}/assets/*.nupkg
+            artifacts/releases/${{ github.ref_name }}/assets/*.whl
+            artifacts/releases/${{ github.ref_name }}/assets/darkvault_client-*.tar.gz
+            artifacts/releases/${{ github.ref_name }}/assets/*.tgz
+      - name: Publish GitHub Release with all assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $true
+          $assets = @(Get-ChildItem "artifacts/releases/$env:RELEASE_TAG/assets" -File | ForEach-Object FullName)
+          if ($assets.Count -ne 20) { throw 'Expected 18 packages, release.json and SHA256SUMS.' }
+          gh release create $env:RELEASE_TAG @assets --verify-tag --draft --title "DarkVault $env:RELEASE_TAG" --generate-notes
+          $commit = git rev-parse HEAD
+          gh api 'repos/{owner}/{repo}/git/refs' -f "ref=refs/tags/clients/go/$env:RELEASE_TAG" -f "sha=$commit" --silent
+          gh release edit $env:RELEASE_TAG --draft=false
+
+  publish-pypi:
+    needs: release
+    runs-on: ubuntu-latest
+    environment: release
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: registry-packages
+          path: packages
+      - name: Select Python distributions
+        run: |
+          mkdir dist
+          cp packages/*.whl packages/darkvault_client-*.tar.gz dist/
+      - uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          skip-existing: true
+
+  publish-nuget:
+    needs: release
+    runs-on: ubuntu-latest
+    environment: release
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: registry-packages
+          path: packages
+      - uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: '10.0.x'
+      - uses: NuGet/login@v1
+        id: login
+        with:
+          user: ${{ vars.NUGET_USER }}
+      - name: Publish both NuGet packages
+        env:
+          NUGET_API_KEY: ${{ steps.login.outputs.NUGET_API_KEY }}
+        run: dotnet nuget push "packages/*.nupkg" --api-key "$NUGET_API_KEY" --source https://api.nuget.org/v3/index.json --skip-duplicate
+
+  publish-npm:
+    needs: release
+    runs-on: ubuntu-latest
+    environment: release
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          name: registry-packages
+          path: packages
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+      - name: Install npm with OIDC support
+        run: npm install --global npm@11
+      - name: Publish verified npm archive
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: node tools/publish-npm.mjs "packages/darkvault-client-${RELEASE_TAG#v}.tgz" "${RELEASE_TAG#v}"
