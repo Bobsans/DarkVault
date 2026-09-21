@@ -35,9 +35,14 @@ func resolveConfiguration(cmd *cobra.Command, filename string) (config.Settings,
 	if raw := os.Getenv("DARKVAULT_URL"); raw != "" {
 		connection, err = client.NewFromURL(raw)
 		if err != nil {
-			return settings, errors.New("invalid DARKVAULT_URL")
+			if cmd.Flags().Changed("server") || cmd.Flags().Changed("token") || cmd.Flags().Changed("token-file") {
+				connection = nil
+			} else {
+				return settings, errors.New("invalid DARKVAULT_URL")
+			}
+		} else {
+			settings.DefaultBucket = connection.DefaultBucket
 		}
-		settings.DefaultBucket = connection.DefaultBucket
 	}
 	settings.Server = value("server", "DARKVAULT_SERVER", settings.Server)
 	if connection != nil && !cmd.Flags().Changed("server") {
@@ -72,7 +77,7 @@ func resolveConfiguration(cmd *cobra.Command, filename string) (config.Settings,
 			err = errors.New("token file path is empty")
 		}
 	case connection != nil:
-		settings.Token = connection.Token
+		settings.Token = connection.Token()
 	case os.Getenv("DARKVAULT_TOKEN_FILE") != "":
 		tokenFile = os.Getenv("DARKVAULT_TOKEN_FILE")
 	case os.Getenv("DARKVAULT_TOKEN") != "":

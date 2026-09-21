@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"math"
+	"os"
 	"sort"
 	"strings"
 )
@@ -184,6 +185,15 @@ func (c *Client) ReadTypedBucket(ctx context.Context, bucket string) (map[string
 		return nil, err
 	}
 	return snapshot.TypedSecrets()
+}
+
+// LoadConfigurationFromEnv reads DARKVAULT_URL and loads one configuration snapshot.
+func LoadConfigurationFromEnv(ctx context.Context, target any) error {
+	url := os.Getenv("DARKVAULT_URL")
+	if strings.TrimSpace(url) == "" {
+		return errors.New("set DARKVAULT_URL in the process environment before loading DarkVault configuration")
+	}
+	return LoadConfiguration(ctx, url, target)
 }
 
 // LoadConfiguration reads one configuration snapshot from a URL into a struct or map pointer.

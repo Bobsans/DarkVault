@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
 import http.client
 import math
+import os
 import random
 import re
 import ssl
@@ -391,8 +392,12 @@ class DarkVaultClient:
         return self.execute("token.info", {})
 
 
-def load_configuration(url: str, *, nested: bool = True, timeout: float = 30,
+def load_configuration(url: str | None = None, *, nested: bool = True, timeout: float = 30,
                        ssl_context: ssl.SSLContext | None = None) -> dict[str, Any]:
     """Load one configuration snapshot and close the connection, including on failure."""
+    if url is None:
+        url = os.environ.get("DARKVAULT_URL")
+        if url is None or not url.strip():
+            raise ValueError("Set DARKVAULT_URL in the process environment or pass a URL explicitly")
     with DarkVaultClient.from_url(url, timeout=timeout, ssl_context=ssl_context) as client:
         return client.read_configuration(nested=nested)

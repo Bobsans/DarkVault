@@ -18,6 +18,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 	"unicode/utf8"
 
@@ -27,10 +28,27 @@ import (
 const MaxBody = 2 * 1024 * 1024
 
 type Client struct {
-	URL, Token    string
-	DefaultBucket string
-	HTTP          *http.Client
+	URL            string
+	token          string
+	DefaultBucket  string
+	HTTP           *http.Client
+	keyMu          sync.Mutex
+	serverKey      *ServerKey
+	serverKeyUntil time.Time
+	serverKeyURL   string
 }
+
+// Token returns the bearer token for explicit credential handoff.
+func (c *Client) Token() string { return c.token }
+
+// String intentionally omits the bearer token from diagnostic output.
+func (c *Client) String() string {
+	return fmt.Sprintf("darkvault.Client{URL:%q, DefaultBucket:%q}", c.URL, c.DefaultBucket)
+}
+
+// GoString keeps %#v output secret-free as well.
+func (c *Client) GoString() string { return c.String() }
+
 type ServerKey struct {
 	ProtocolVersion int             `json:"protocolVersion"`
 	ServerID        string          `json:"serverId"`
@@ -59,9 +77,10 @@ type Response struct {
 	Error     *APIError       `json:"error"`
 }
 type APIError struct {
-	Code      string `json:"code"`
-	Status    int    `json:"-"`
-	RequestID string `json:"-"`
+	Code       string        `json:"code"`
+	Status     int           `json:"-"`
+	RequestID  string        `json:"-"`
+	RetryAfter time.Duration `json:"-"`
 }
 
 func (e *APIError) Error() string { return "DarkVault request failed (" + e.Code + ")" }
@@ -93,7 +112,7 @@ func New(server, token string) (*Client, error) {
 	if err = ValidateToken(token); err != nil {
 		return nil, err
 	}
-	return &Client{URL: server, Token: token, HTTP: &http.Client{Timeout: 30 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}}, nil
+	return &Client{URL: server, token: token, HTTP: &http.Client{Timeout: 30 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}}, nil
 }
 
 // NewFromURL accepts https://<token>@host[:port]/bucket-name.
@@ -284,6 +303,93 @@ func Decrypt(body string, key *ecdsa.PrivateKey, kid, kind string) ([]byte, erro
 	}
 	return plain, ValidateJSON(plain)
 }
+func (c *Client) cachedServerKey() (ServerKey, bool) {
+	c.keyMu.Lock()
+	defer c.keyMu.Unlock()
+	if c.serverKey == nil || c.serverKeyURL != c.URL || !time.Now().Before(c.serverKeyUntil) || !c.serverKey.NotAfter.After(time.Now()) {
+		return ServerKey{}, false
+	}
+	return *c.serverKey, true
+}
+func (c *Client) invalidateServerKey() {
+	c.keyMu.Lock()
+	c.serverKey = nil
+	c.serverKeyUntil = time.Time{}
+	c.serverKeyURL = ""
+	c.keyMu.Unlock()
+}
+func (c *Client) discoverServerKey(ctx context.Context, transport *http.Client) (ServerKey, error) {
+	if key, ok := c.cachedServerKey(); ok {
+		return key, nil
+	}
+	discovery, err := http.NewRequestWithContext(ctx, "GET", c.URL+"/api/v1/crypto/key", nil)
+	if err != nil {
+		return ServerKey{}, err
+	}
+	r, err := transport.Do(discovery)
+	if err != nil {
+		return ServerKey{}, errors.New("server unavailable")
+	}
+	body, err := readBody(r.Body)
+	r.Body.Close()
+	if err != nil {
+		return ServerKey{}, err
+	}
+	if r.StatusCode != http.StatusOK {
+		return ServerKey{}, &APIError{Code: "key_unavailable", Status: r.StatusCode}
+	}
+	var key ServerKey
+	if err = ValidateJSON(body); err != nil {
+		return ServerKey{}, err
+	}
+	if err = json.Unmarshal(body, &key); err != nil {
+		return ServerKey{}, err
+	}
+	if key.ProtocolVersion != 1 || !key.NotAfter.After(time.Now()) {
+		return ServerKey{}, errors.New("invalid server key")
+	}
+	expires := time.Now().Add(5 * time.Minute)
+	if key.NotAfter.Before(expires) {
+		expires = key.NotAfter
+	}
+	c.keyMu.Lock()
+	c.serverKey = &key
+	c.serverKeyUntil = expires
+	c.serverKeyURL = c.URL
+	c.keyMu.Unlock()
+	return key, nil
+}
+func parseRetryAfter(value string) time.Duration {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return 0
+	}
+	if seconds, err := strconv.Atoi(value); err == nil && seconds >= 0 {
+		return time.Duration(seconds) * time.Second
+	}
+	if date, err := http.ParseTime(value); err == nil {
+		return maxDuration(0, time.Until(date))
+	}
+	return 0
+}
+func maxDuration(left, right time.Duration) time.Duration {
+	if left > right {
+		return left
+	}
+	return right
+}
+func plainAPIError(body []byte, status int, requestID string, headers http.Header) error {
+	code := "transport_error"
+	var envelope struct {
+		Error struct {
+			Code string `json:"code"`
+		} `json:"error"`
+	}
+	if ValidateJSON(body) == nil && json.Unmarshal(body, &envelope) == nil && envelope.Error.Code != "" {
+		code = envelope.Error.Code
+	}
+	return &APIError{Code: code, Status: status, RequestID: requestID, RetryAfter: parseRetryAfter(headers.Get("Retry-After"))}
+}
 func (c *Client) Execute(ctx context.Context, op string, parameters any) (json.RawMessage, error) {
 	if c.HTTP == nil {
 		return nil, errors.New("HTTP client is required")
@@ -291,7 +397,7 @@ func (c *Client) Execute(ctx context.Context, op string, parameters any) (json.R
 	if _, err := NormalizeServer(c.URL); err != nil {
 		return nil, err
 	}
-	if err := ValidateToken(c.Token); err != nil {
+	if err := ValidateToken(c.token); err != nil {
 		return nil, err
 	}
 	transport := *c.HTTP
@@ -302,88 +408,75 @@ func (c *Client) Execute(ctx context.Context, op string, parameters any) (json.R
 	}
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
-	discovery, e := http.NewRequestWithContext(ctx, "GET", c.URL+"/api/v1/crypto/key", nil)
-	if e != nil {
-		return nil, e
+	keyRetry := false
+	for {
+		key, err := c.discoverServerKey(ctx, &transport)
+		if err != nil {
+			return nil, err
+		}
+		reply, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+		if err != nil {
+			return nil, err
+		}
+		id, err := newID()
+		if err != nil {
+			return nil, err
+		}
+		request := Request{1, id, time.Now().UTC(), key.ServerID, "data", op, parameters, jose.JSONWebKey{Key: &reply.PublicKey}}
+		plain, err := json.Marshal(request)
+		if err != nil {
+			return nil, err
+		}
+		encrypted, err := Encrypt(plain, key.PublicKey, key.Kid, "darkvault-request+jwe")
+		if err != nil {
+			return nil, err
+		}
+		message, err := http.NewRequestWithContext(ctx, "POST", c.URL+"/api/v1/execute", strings.NewReader(encrypted))
+		if err != nil {
+			return nil, err
+		}
+		message.Header.Set("Authorization", "Bearer "+c.token)
+		message.Header.Set("Content-Type", "application/jose")
+		message.Header.Set("Accept", "application/jose")
+		r, err := transport.Do(message)
+		if err != nil {
+			return nil, errors.New("request outcome unknown; verify state before retrying")
+		}
+		body, err := readBody(r.Body)
+		r.Body.Close()
+		if err != nil {
+			return nil, err
+		}
+		if strings.Split(r.Header.Get("Content-Type"), ";")[0] != "application/jose" {
+			apiErr := plainAPIError(body, r.StatusCode, id, r.Header)
+			if api, ok := apiErr.(*APIError); ok && api.Code == "unknown_key" && !keyRetry {
+				c.invalidateServerKey()
+				keyRetry = true
+				continue
+			}
+			return nil, apiErr
+		}
+		plain, err = Decrypt(string(body), reply, id, "darkvault-response+jwe")
+		if err != nil {
+			return nil, errors.New("invalid encrypted response")
+		}
+		var response Response
+		if err = json.Unmarshal(plain, &response); err != nil {
+			return nil, err
+		}
+		if response.V != 1 || response.RequestID != id || response.ServerID != key.ServerID || response.Audience != "data" || response.Operation != op || response.Status != r.StatusCode {
+			return nil, errors.New("mismatched response")
+		}
+		if response.Error != nil {
+			response.Error.Status = r.StatusCode
+			response.Error.RequestID = id
+			return nil, response.Error
+		}
+		if r.StatusCode < 200 || r.StatusCode >= 300 || len(response.Data) == 0 || bytes.Equal(response.Data, []byte("null")) {
+			return nil, fmt.Errorf("invalid response status: %d", r.StatusCode)
+		}
+		return response.Data, nil
 	}
-	r, e := transport.Do(discovery)
-	if e != nil {
-		return nil, errors.New("server unavailable")
-	}
-	body, e := readBody(r.Body)
-	r.Body.Close()
-	if e != nil {
-		return nil, e
-	}
-	if r.StatusCode != 200 {
-		return nil, &APIError{Code: "key_unavailable", Status: r.StatusCode}
-	}
-	var key ServerKey
-	if e = ValidateJSON(body); e != nil {
-		return nil, e
-	}
-	if e = json.Unmarshal(body, &key); e != nil {
-		return nil, e
-	}
-	if key.ProtocolVersion != 1 || !key.NotAfter.After(time.Now()) {
-		return nil, errors.New("invalid server key")
-	}
-	reply, e := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
-	if e != nil {
-		return nil, e
-	}
-	id, e := newID()
-	if e != nil {
-		return nil, e
-	}
-	request := Request{1, id, time.Now().UTC(), key.ServerID, "data", op, parameters, jose.JSONWebKey{Key: &reply.PublicKey}}
-	plain, e := json.Marshal(request)
-	if e != nil {
-		return nil, e
-	}
-	encrypted, e := Encrypt(plain, key.PublicKey, key.Kid, "darkvault-request+jwe")
-	if e != nil {
-		return nil, e
-	}
-	message, e := http.NewRequestWithContext(ctx, "POST", c.URL+"/api/v1/execute", strings.NewReader(encrypted))
-	if e != nil {
-		return nil, e
-	}
-	message.Header.Set("Authorization", "Bearer "+c.Token)
-	message.Header.Set("Content-Type", "application/jose")
-	message.Header.Set("Accept", "application/jose")
-	r, e = transport.Do(message)
-	if e != nil {
-		return nil, errors.New("request outcome unknown; verify state before retrying")
-	}
-	defer r.Body.Close()
-	body, e = readBody(r.Body)
-	if e != nil {
-		return nil, e
-	}
-	if strings.Split(r.Header.Get("Content-Type"), ";")[0] != "application/jose" {
-		return nil, &APIError{Code: "transport_error", Status: r.StatusCode, RequestID: id}
-	}
-	plain, e = Decrypt(string(body), reply, id, "darkvault-response+jwe")
-	if e != nil {
-		return nil, errors.New("invalid encrypted response")
-	}
-	var response Response
-	if e = json.Unmarshal(plain, &response); e != nil {
-		return nil, e
-	}
-	if response.V != 1 || response.RequestID != id || response.ServerID != key.ServerID || response.Audience != "data" || response.Operation != op || response.Status != r.StatusCode {
-		return nil, errors.New("mismatched response")
-	}
-	if response.Error != nil {
-		response.Error.Status = r.StatusCode
-		response.Error.RequestID = id
-		return nil, response.Error
-	}
-	if r.StatusCode < 200 || r.StatusCode >= 300 || len(response.Data) == 0 || bytes.Equal(response.Data, []byte("null")) {
-		return nil, fmt.Errorf("invalid response status: %d", r.StatusCode)
-	}
-	return response.Data, nil
 }
 func (c *Client) ReadBucket(ctx context.Context, bucket string) (map[string]string, error) {
 	snapshot, err := c.ReadBucketSnapshot(ctx, bucket)

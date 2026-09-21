@@ -122,10 +122,38 @@
             }
           },
           "201": {
-            "description": "Encrypted creation result"
+            "description": "Encrypted creation result",
+            "content": {
+              "application/jose": {
+                "schema": {
+                  "$ref": "#/components/schemas/JweCompact"
+                }
+              }
+            }
           },
           "default": {
-            "description": "Encrypted application error, or non-secret JSON error before envelope validation"
+            "description": "Encrypted application error, or non-secret JSON error before envelope validation",
+            "content": {
+              "application/jose": {
+                "schema": {
+                  "$ref": "#/components/schemas/JweCompact"
+                }
+              },
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "$ref": "#/components/schemas/Error"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
           },
           "429": {
             "description": "Application quota or temporary source ban",
@@ -277,10 +305,38 @@
             }
           },
           "201": {
-            "description": "Encrypted creation result"
+            "description": "Encrypted creation result",
+            "content": {
+              "application/jose": {
+                "schema": {
+                  "$ref": "#/components/schemas/JweCompact"
+                }
+              }
+            }
           },
           "default": {
-            "description": "Encrypted application error, or non-secret JSON error before envelope validation"
+            "description": "Encrypted application error, or non-secret JSON error before envelope validation",
+            "content": {
+              "application/jose": {
+                "schema": {
+                  "$ref": "#/components/schemas/JweCompact"
+                }
+              },
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "$ref": "#/components/schemas/Error"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
           },
           "429": {
             "description": "Application quota or temporary source ban",
@@ -3284,7 +3340,9 @@
               "name",
               "scopes",
               "bucketIds",
-              "creatableBucketNames"
+              "allBuckets",
+              "creatableBucketNames",
+              "expiresAt"
             ],
             "additionalProperties": false
           },

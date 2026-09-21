@@ -30,7 +30,7 @@ var token = Environment.GetEnvironmentVariable("DARKVAULT_TOKEN")
 
 using var startupTimeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
 
-await builder.Configuration.AddFromDarkVaultBucketAsync(
+await builder.Configuration.AddFromDarkVaultAsync(
     "https://vault.example.com",
     token,
     "app_prod",
@@ -55,14 +55,14 @@ Namespace: `Microsoft.Extensions.Configuration`. Both methods extend
 `IConfigurationBuilder` and return `Task<IConfigurationBuilder>`.
 
 ```text
-AddFromDarkVaultBucketAsync(
+AddFromDarkVaultAsync(
     string server,
     string token,
     string bucket,
     CancellationToken cancellationToken = default
 )
 
-AddFromDarkVaultBucketAsync(
+AddFromDarkVaultAsync(
     DarkVaultClient client,
     string bucket,
     CancellationToken cancellationToken = default
@@ -83,7 +83,7 @@ using var vault = new DarkVaultClient("https://vault.example.com", token, http);
 
 var configurationBuilder = new ConfigurationBuilder();
 
-await configurationBuilder.AddFromDarkVaultBucketAsync(vault, "app_prod");
+await configurationBuilder.AddFromDarkVaultAsync(vault, "app_prod");
 
 var configuration = configurationBuilder.Build();
 ```
@@ -161,4 +161,26 @@ configuration source. Values override earlier providers; later providers can
 override DarkVault. Existing case-insensitive key collision checks and typed-null
 handling apply. There is no automatic refresh.
 
-The previous `AddFromDarkVaultBucketAsync` overloads remain available.
+All asynchronous overloads use `AddFromDarkVaultAsync`.
+
+## Load from the environment
+
+```csharp
+await builder.Configuration.AddFromDarkVaultAsync();
+// Synchronous startup:
+builder.Configuration.AddFromDarkVault();
+```
+
+These overloads read `DARKVAULT_URL` from the process environment and reject
+missing, empty or whitespace-only values with `InvalidOperationException`.
+An explicit URL takes precedence because the URL overload does not read the
+environment. The existing client deadline is 30 seconds; pass a cancellation
+token to stop sooner:
+
+```csharp
+await builder.Configuration.AddFromDarkVaultAsync(timeout.Token);
+```
+
+The extension does not load `.env` files. If you use one, load it into the process
+environment before calling the extension. The other SDKs also provide configuration
+loading helpers that read DARKVAULT_URL; client constructors and URL factories remain explicit.

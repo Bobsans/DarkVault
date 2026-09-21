@@ -62,7 +62,7 @@ operations = {
     "secret.set": (obj({"bucket": S, "key": S, "value": S, "expectedRevision": REV, "type": SECRET_TYPE}, ["bucket", "key", "value", "expectedRevision"]), ref("SecretMetadata")),
     "secret.delete": (obj({"bucket": S, "key": S, "expectedRevision": REV}), obj({"deleted": {"const": True}})),
     "token.info": (obj({}), ref("TokenInfo")),
-    "token.create": (obj({"name": S, "scopes": array({"enum": SCOPES}), "bucketIds": array(UUID), "allBuckets": BOOL, "creatableBucketNames": array(S), "expiresAt": nullable(DATE)}, ["name", "scopes", "bucketIds", "creatableBucketNames"]), obj({"metadata": ref("TokenRecord"), "token": {"type": "string", "pattern": "^dv1_[A-Za-z0-9_-]{60}$"}})),
+    "token.create": (obj({"name": S, "scopes": array({"enum": SCOPES}), "bucketIds": array(UUID), "allBuckets": BOOL, "creatableBucketNames": array(S), "expiresAt": nullable(DATE)}, ["name", "scopes", "bucketIds", "allBuckets", "creatableBucketNames", "expiresAt"]), obj({"metadata": ref("TokenRecord"), "token": {"type": "string", "pattern": "^dv1_[A-Za-z0-9_-]{60}$"}})),
     "token.list": (ref("PageParameters"), page(ref("TokenRecord"))),
     "token.revoke": (obj({"id": UUID}), obj({"revoked": {"const": True}})),
     "audit.list": (obj({**listing, "order": {"enum": ["", "asc", "desc"]}, "search": {"type": "string", "maxLength": 256},
@@ -76,11 +76,26 @@ for operation, (parameters, result) in operations.items():
 
 def execute(admin):
     names = admin_operations if admin else data_operations
-    return {"post": {"operationId": "adminExecute" if admin else "execute", "security": [{"AdminSession": [], "Csrf": []}] if admin else [{"BearerToken": []}],
-        "requestBody": {"required": True, "content": {"application/jose": {"schema": ref("JweCompact")}}},
-        "x-decrypted-request": {"oneOf": [ref(o + ".Request") for o in names]},
-        "x-decrypted-response": {"oneOf": [ref(o + ".Response") for o in names]},
-        "responses": {"200": {"description": "Encrypted result", "content": {"application/jose": {"schema": ref("JweCompact")}}}, "201": {"description": "Encrypted creation result"}, "default": {"description": "Encrypted application error, or non-secret JSON error before envelope validation"}}}}
+    return {
+        "post": {
+            "operationId": "adminExecute" if admin else "execute",
+            "security": [{"AdminSession": [], "Csrf": []}] if admin else [{"BearerToken": []}],
+            "requestBody": {"required": True, "content": {"application/jose": {"schema": ref("JweCompact")}}},
+            "x-decrypted-request": {"oneOf": [ref(o + ".Request") for o in names]},
+            "x-decrypted-response": {"oneOf": [ref(o + ".Response") for o in names]},
+            "responses": {
+                "200": {"description": "Encrypted result", "content": {"application/jose": {"schema": ref("JweCompact")}}},
+                "201": {"description": "Encrypted creation result", "content": {"application/jose": {"schema": ref("JweCompact")}}},
+                "default": {
+                    "description": "Encrypted application error, or non-secret JSON error before envelope validation",
+                    "content": {
+                        "application/jose": {"schema": ref("JweCompact")},
+                        "application/json": {"schema": obj({"error": ref("Error")})}
+                    }
+                }
+            }
+        }
+    }
 
 paths = {"/api/v1/execute": execute(False), "/admin/api/v1/execute": execute(True),
     "/api/v1/crypto/key": {"get": {"operationId": "getCryptoKey", "responses": {"200": {"description": "Current server public key", "content": {"application/json": {"schema": ref("CryptoKey")}}}}}},

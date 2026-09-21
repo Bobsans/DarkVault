@@ -31,6 +31,8 @@ public sealed partial class VaultStore : IDisposable {
             CREATE INDEX IF NOT EXISTS audit_time ON audit(time);
             INSERT OR IGNORE INTO settings VALUES ('revision','0');
             """);
+        // Validate existing ciphertext before the instance accepts commands after recovery.
+        Verify();
     }
     public void Dispose() => db.Dispose();
     private SqliteCommand Command(string sql, params object?[] values) {
@@ -207,17 +209,44 @@ public sealed partial class VaultStore : IDisposable {
         }
         return (cursor, limit);
     }
-    private static object Page<T>(IEnumerable<T> values, Func<T, string> id, JsonElement p) {
-        var (cursor, limit) = Paging(p);
-        var items = values.OrderBy(id, StringComparer.Ordinal).Where(v => string.CompareOrdinal(id(v), cursor) > 0).Take(limit + 1).ToArray();
-        return new Page<T>(items.Take(limit).ToArray(), items.Length > limit ? Wire.Base64(Encoding.UTF8.GetBytes(id(items[limit - 1]))) : null);
+    private static Page<T> PageRows<T>(IReadOnlyList<T> rows, Func<T, string> id, int limit) {
+        var items = rows.Take(limit).ToArray();
+        return new Page<T>(items, rows.Count > limit ? Wire.Base64(Encoding.UTF8.GetBytes(id(items[^1]))) : null);
+    }
+    private Page<Bucket> ListBuckets(Principal principal, JsonElement parameters) {
+        var (cursor, limit) = Paging(parameters);
+        var sql = "SELECT json FROM buckets WHERE id > $p0";
+        object?[] values;
+        if (principal.IsAdmin || principal.Token!.AllBuckets) {
+            sql += " ORDER BY id LIMIT $p1";
+            values = [cursor, limit + 1];
+        } else {
+            var ids = principal.Token.BucketIds;
+            if (ids.Length == 0) return new Page<Bucket>(Array.Empty<Bucket>(), null);
+            var placeholders = string.Join(",", Enumerable.Range(0, ids.Length).Select(i => "$p" + (i + 2)));
+            sql += $" AND id IN ({placeholders}) ORDER BY id LIMIT $p1";
+            values = new object?[ids.Length + 2]; values[0] = cursor; values[1] = limit + 1; Array.Copy(ids, 0, values, 2, ids.Length);
+        }
+        return PageRows(Many<Bucket>(sql, values), b => b.Id, limit);
+    }
+    private Page<SecretMetadata> ListSecrets(Bucket bucket, JsonElement parameters) {
+        var (cursor, limit) = Paging(parameters);
+        var rows = Many<StoredSecret>("SELECT json FROM entries WHERE bucket=$p0 AND id>$p1 ORDER BY id LIMIT $p2", bucket.Id, cursor, limit + 1)
+            .Select(s => s.Metadata).ToArray();
+        return PageRows(rows, m => m.Id, limit);
+    }
+    private Page<TokenRecord> ListTokens(JsonElement parameters) {
+        var (cursor, limit) = Paging(parameters);
+        var rows = Many<TokenRecord>("SELECT json FROM tokens WHERE id>$p0 ORDER BY id LIMIT $p1", cursor, limit + 1)
+            .Select(LimitTokenLifetime).ToArray();
+        return PageRows(rows, t => t.Info.Id, limit);
     }
     private object Dispatch(Principal p, string op, JsonElement args, List<AuditResource> removed) {
         if (op == "token.info") { Fields(args); if (p.IsAdmin) throw new VaultFault(400, "invalid_request"); return p.Token!; }
         if (op.StartsWith("token.", StringComparison.Ordinal) || op == "audit.list") return AdminCommand(p, op, args);
         if (op == "bucket.list") {
             Fields(args, "cursor", "limit"); Require(p, "bucket:list");
-            return Page(Many<Bucket>("SELECT json FROM buckets").Where(b => Allowed(p, b.Id)), b => b.Id, args);
+            return ListBuckets(p, args);
         }
         if (op == "bucket.create") {
             Fields(args, "name", "description"); Require(p, "bucket:create");
@@ -263,7 +292,7 @@ public sealed partial class VaultStore : IDisposable {
         }
         if (op == "secret.list") {
             Fields(args, "bucket", "cursor", "limit"); Require(p, "secret:list");
-            return Page(Many<StoredSecret>("SELECT json FROM entries WHERE bucket=$p0", bucket.Id).Select(s => s.Metadata), m => m.Id, args);
+            return ListSecrets(bucket, args);
         }
         var key = Text(args, "key");
         if (key.Any(char.IsControl)) throw new VaultFault(400, "invalid_key");
@@ -343,7 +372,7 @@ public sealed partial class VaultStore : IDisposable {
             Execute("INSERT INTO tokens VALUES ($p0,$p1,$p2)", info.Id, Wire.HashToken(token), ServerJson.Serialize(record));
             return new TokenCreated(record, token);
         }
-        if (op == "token.list") { Fields(args, "cursor", "limit"); return Page(Many<TokenRecord>("SELECT json FROM tokens").Select(LimitTokenLifetime).ToList(), t => t.Info.Id, args); }
+        if (op == "token.list") { Fields(args, "cursor", "limit"); return ListTokens(args); }
         if (op == "token.revoke") {
             Fields(args, "id"); var id = Text(args, "id");
             var token = One<TokenRecord>("SELECT json FROM tokens WHERE id=$p0", id) ?? throw new VaultFault(404, "not_found");

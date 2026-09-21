@@ -180,6 +180,19 @@ func TestLiveOperations(t *testing.T) {
 	if err = LoadConfiguration(ctx, connectionURL, &config); err != nil || config.Redis.Port != 6379 || config.Redis.Enabled || config.Redis.Optional != nil {
 		t.Fatal("load configuration", err)
 	}
+	t.Setenv("DARKVAULT_URL", connectionURL)
+	if err = LoadConfigurationFromEnv(ctx, &config); err != nil || config.Redis.Port != 6379 {
+		t.Fatal("environment configuration", err)
+	}
+	cancelled, cancelLoad := context.WithCancel(ctx)
+	cancelLoad()
+	if err = LoadConfigurationFromEnv(cancelled, &config); err == nil {
+		t.Fatal("environment cancellation", err)
+	}
+	t.Setenv("DARKVAULT_URL", "invalid")
+	if err = LoadConfiguration(ctx, connectionURL, &config); err != nil {
+		t.Fatal("explicit URL used environment", err)
+	}
 	if err = c.ReadConfiguration(ctx, "go-sdk-live", &config); err != nil || config.Redis.Port != 6379 || config.Redis.Enabled || config.Redis.Optional != nil {
 		t.Fatal("typed configuration", err)
 	}

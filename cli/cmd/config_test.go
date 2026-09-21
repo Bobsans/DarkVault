@@ -205,4 +205,9 @@ func TestConnectionURLPrecedence(t *testing.T) {
 	if err := cmd.Execute(); err == nil || strings.Contains(err.Error(), token) {
 		t.Fatal("invalid URL accepted or exposed")
 	}
+	t.Setenv("DARKVAULT_URL", "invalid")
+	got = resolve("--server", "https://flag.example.com", "--token", other)
+	if got.Server != "https://flag.example.com" || got.Token != other {
+		t.Fatal("explicit flags did not bypass invalid DARKVAULT_URL")
+	}
 }

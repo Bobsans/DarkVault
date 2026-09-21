@@ -91,7 +91,7 @@ builder.Configuration.AddInMemoryCollection(secrets);
 Или пакет `DarkVault.Extensions.Configuration`:
 
 ```csharp
-await builder.Configuration.AddFromDarkVaultBucketAsync(
+await builder.Configuration.AddFromDarkVaultAsync(
     "https://vault.example.com", token, "app_qa", cancellationToken);
 ```
 
@@ -232,7 +232,7 @@ darkvault exec -- dotnet MyApp.dll
 
 SDK получают строку явно через `FromUrl` (C#),
 `from_url` (Python), `fromUrl` (TypeScript) или
-`NewFromURL` (Go). Они не читают окружение автоматически.
+`NewFromURL` (Go). Эти фабрики не читают окружение автоматически.
 Чтение бакета и конфигурации использует бакет из строки при пропуске аргумента
 (в Go — при пустой строке). Для остальных операций доступно свойство
 `DefaultBucket` / `default_bucket` / `defaultBucket`.
@@ -273,3 +273,30 @@ UUID, секреты и доступ токенов сохраняются. По
 CLI: `darkvault bucket update old_name --name new_name --revision 42`, где `42` —
 текущая revision из `darkvault bucket get old_name`. Описание сохраняется, если
 не передан `--description`. Требуется scope `bucket:write`.
+
+### ASP.NET: URL из окружения
+
+```csharp
+await builder.Configuration.AddFromDarkVaultAsync();
+// Synchronous startup:
+builder.Configuration.AddFromDarkVault();
+```
+
+Перегрузки без URL читают `DARKVAULT_URL` из окружения процесса. При отсутствующем,
+пустом или состоящем из пробелов значении выбрасывается `InvalidOperationException`.
+Стандартный таймаут клиента — 30 секунд; для более ранней отмены передайте
+`AddFromDarkVaultAsync(timeout.Token)`. Явно переданный URL используется независимо
+от окружения. Файл `.env` расширение не загружает: его должен предварительно
+загрузить код приложения или среда запуска.
+
+### Другие SDK: настройки из DARKVAULT_URL
+
+- Python: `load_configuration()`; URL можно опустить или передать `None`.
+- TypeScript в Node.js: `await loadConfiguration()`; для передачи опций и отмены
+  используйте `loadConfiguration(undefined, options, signal)`. В браузере нужен явный URL.
+- Go: `darkvault.LoadConfigurationFromEnv(ctx, &settings)`.
+- C#: `await DarkVaultClient.LoadConfigurationAsync(SettingsJsonContext.Default.AppSettings)`.
+
+Отсутствующая, пустая или состоящая из пробелов переменная вызывает ошибку.
+Явный URL не заменяется значением окружения. Файл `.env` загружается приложением,
+а существующие таймауты, отмена и правила преобразования настроек сохраняются.

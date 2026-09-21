@@ -39,6 +39,7 @@ public static class ServerCommands {
             var directory = Path.GetFullPath(Environment.GetEnvironmentVariable("DARKVAULT_DATA") ?? "data"); SecureDirectory(directory);
             using var processLock = new FileStream(Path.Combine(directory, "server.lock"), FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
             var database = Path.Combine(directory, "vault.db"); var keys = Path.Combine(directory, "keyring.json");
+            SecureFile(database); SecureFile(keys);
             var wrappingFile = Environment.GetEnvironmentVariable("DARKVAULT_KEYRING_KEY_FILE");
             byte[]? wrappingKey = null;
             if (!string.IsNullOrEmpty(wrappingFile)) {
@@ -66,7 +67,8 @@ public static class ServerCommands {
                 case "rotate-transport": ring.RotateTransport(args.Contains("--emergency")); Console.WriteLine("Transport key rotated."); return 0;
                 case "backup":
                     if (args.Length != 2 || Directory.Exists(args[1])) throw new ArgumentException("Specify a new backup directory.");
-                    SecureDirectory(args[1]); store.Backup(Path.Combine(args[1], "vault.db"));
+                    SecureDirectory(args[1]);
+                    var backupDatabase = Path.Combine(args[1], "vault.db"); store.Backup(backupDatabase); SecureFile(backupDatabase);
                     KeyRing.SavePrivate(Path.Combine(args[1], "keyring.json"), File.ReadAllText(keys));
                     Console.WriteLine("Backup completed. Rotate the data key before writing after a restore."); return 0;
                 case "serve":
@@ -92,6 +94,17 @@ public static class ServerCommands {
                 InheritanceFlags.ContainerInherit | InheritanceFlags.ObjectInherit, PropagationFlags.None, AccessControlType.Allow));
             new DirectoryInfo(path).SetAccessControl(security);
         } else File.SetUnixFileMode(path, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+    }
+    public static void SecureFile(string path) {
+        path = Path.GetFullPath(path);
+        if (!File.Exists(path)) return;
+        if ((File.GetAttributes(path) & FileAttributes.ReparsePoint) != 0)
+            throw new InvalidOperationException("Vault data files cannot be symbolic links.");
+        if (OperatingSystem.IsWindows()) {
+            var security = new FileSecurity(); security.SetAccessRuleProtection(true, false);
+            security.AddAccessRule(new FileSystemAccessRule(WindowsIdentity.GetCurrent().User!, FileSystemRights.FullControl, AccessControlType.Allow));
+            new FileInfo(path).SetAccessControl(security);
+        } else File.SetUnixFileMode(path, UnixFileMode.UserRead | UnixFileMode.UserWrite);
     }
     private static string ReadPassword(string label) {
         if (Console.IsInputRedirected) throw new InvalidOperationException("An interactive terminal is required.");

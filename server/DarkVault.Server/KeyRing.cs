@@ -33,6 +33,7 @@ public sealed class KeyRing : IDisposable {
             if (!create) throw new InvalidOperationException("Keyring missing. Restore it before opening this database.");
             state = new(); RotateData(); RotateTransport();
         }
+        ValidateState();
     }
     public static void SavePrivate(string path, string content, bool overwrite = true) {
         var tmp = path + ".tmp-" + Guid.NewGuid().ToString("N");
@@ -51,6 +52,16 @@ public sealed class KeyRing : IDisposable {
             }
             File.Move(tmp, path, overwrite);
         } finally { if (File.Exists(tmp)) File.Delete(tmp); }
+    }
+    private void ValidateState() {
+        if (!Guid.TryParse(state.ServerId, out _) || state.Data.Count == 0 || state.Data.All(k => k.Id != state.ActiveData))
+            throw new CryptographicException("Keyring has no valid active data key.");
+        foreach (var key in state.Data) {
+            if (string.IsNullOrWhiteSpace(key.Id) || key.Uses < 0) throw new CryptographicException("Invalid data key metadata.");
+            byte[] bytes;
+            try { bytes = Convert.FromBase64String(key.Key); } catch (FormatException ex) { throw new CryptographicException("Invalid data key.", ex); }
+            if (bytes.Length != 32) throw new CryptographicException("Invalid data key.");
+        }
     }
     private void Save() {
         if (wrappingKey is null) { SavePrivate(path, ServerJson.Serialize(state)); return; }
@@ -108,6 +119,7 @@ public sealed class KeyRing : IDisposable {
     public EncryptedValue Encrypt(string value, SecretMetadata metadata) {
         lock (gate) {
             var index = state.Data.FindIndex(k => k.Id == state.ActiveData);
+            if (index < 0) throw new CryptographicException("Keyring has no valid active data key.");
             if (state.Data[index].Uses >= 1 << 20) { RotateData(); index = state.Data.Count - 1; }
             var key = state.Data[index];
             state.Data[index] = key with { Uses = key.Uses + 1 }; Save();

@@ -62,6 +62,38 @@ test('Transport rejects plaintext errors without sending tokens to discovery', a
     await assert.rejects(client.getTokenInfo(), error => error instanceof DarkVaultError && error.code === 'key_unavailable' && !error.message.includes('private text'));
 });
 
+test('Caches server keys and preserves plaintext error metadata', async () => {
+    const { generateKeyPair, exportJWK } = await import('jose');
+    const pair = await generateKeyPair('ECDH-ES', { crv: 'P-256', extractable: true });
+    const serverKey = {
+        protocolVersion: 1,
+        serverId: '00000000-0000-4000-8000-000000000001',
+        kid: '00000000-0000-4000-8000-000000000002',
+        publicKey: await exportJWK(pair.publicKey),
+        notAfter: new Date(Date.now() + 300000).toISOString()
+    };
+    let discovery = 0; let posts = 0;
+    const client = new DarkVaultClient('vault.example.com', token, { fetch: async url => {
+        if (url.endsWith('/crypto/key')) { discovery++; return new Response(JSON.stringify(serverKey), { status: 200, headers: { 'Content-Type': 'application/json' } }); }
+        posts++;
+        const code = posts === 1 ? 'rate_limited' : 'unauthorized';
+        return new Response(JSON.stringify({ error: { code } }), { status: posts === 1 ? 429 : 401, headers: { 'Content-Type': 'application/json', 'Retry-After': '7' } });
+    } });
+    await assert.rejects(client.getTokenInfo(), error => error instanceof DarkVaultError && error.code === 'rate_limited' && error.retryAfterMs === 7000);
+    await assert.rejects(client.getTokenInfo(), error => error instanceof DarkVaultError && error.code === 'unauthorized');
+    assert.equal(discovery, 1); assert.equal(posts, 2);
+
+    let refreshDiscovery = 0; let refreshPosts = 0;
+    const rotating = new DarkVaultClient('vault.example.com', token, { fetch: async url => {
+        if (url.endsWith('/crypto/key')) { refreshDiscovery++; return new Response(JSON.stringify(serverKey), { status: 200, headers: { 'Content-Type': 'application/json' } }); }
+        refreshPosts++;
+        const code = refreshPosts === 1 ? 'unknown_key' : 'unauthorized';
+        return new Response(JSON.stringify({ error: { code } }), { status: refreshPosts === 1 ? 400 : 401, headers: { 'Content-Type': 'application/json' } });
+    } });
+    await assert.rejects(rotating.getTokenInfo(), error => error instanceof DarkVaultError && error.code === 'unauthorized');
+    assert.equal(refreshDiscovery, 2); assert.equal(refreshPosts, 2);
+});
+
 test('All SDK operations against the .NET HTTPS server', { skip: !process.env.DARKVAULT_ACCEPTANCE }, async () => {
     const descriptor = JSON.parse(await readFile(process.env.DARKVAULT_ACCEPTANCE, 'utf8'));
     const client = new DarkVaultClient(descriptor.url, await readFile(descriptor.tokenFile, 'utf8'));
@@ -99,6 +131,14 @@ test('All SDK operations against the .NET HTTPS server', { skip: !process.env.DA
         assert.equal((await client.readBucket(name))['Redis:Optional'], 'null');
         assert.equal((await client.readConfiguration(name)).Redis.Port, 6379);
         const config = await loadConfiguration(descriptor.url.replace('https://', 'https://' + await readFile(descriptor.tokenFile, 'utf8') + '@') + '/' + name); assert.equal(config.Redis.Port, 6379); assert.equal(config.Redis.Optional, null);
+        const previousUrl = process.env.DARKVAULT_URL;
+        try {
+            process.env.DARKVAULT_URL = descriptor.url.replace('https://', 'https://' + await readFile(descriptor.tokenFile, 'utf8') + '@') + '/' + name;
+            assert.deepEqual(await loadConfiguration(), config);
+        } finally {
+            if (previousUrl === undefined) delete process.env.DARKVAULT_URL;
+            else process.env.DARKVAULT_URL = previousUrl;
+        }
         const flag = await client.readSecret(name, 'Redis:Enabled'); await client.updateSecret(name, flag.key, true, flag.revision);
         assert.equal((await client.readTypedBucket(name))[flag.key], true);
         await client.deleteBucket(name, (await client.getBucket(name)).revision, true);
@@ -140,4 +180,39 @@ test('loadConfiguration forwards transport options and cancellation', async () =
         return new Response('', { status: 403 });
     } }), DarkVaultError);
     assert.equal(calls, 1);
+});
+
+test('loadConfiguration reads the environment only when URL is omitted', async () => {
+    const previous = process.env.DARKVAULT_URL;
+    const url = 'https://' + token + '@vault.example.com/qa';
+    const options = { fetch: async origin => {
+        assert.equal(origin, 'https://vault.example.com/api/v1/crypto/key');
+        return new Response('', { status: 403 });
+    } };
+    try {
+        delete process.env.DARKVAULT_URL;
+        await assert.rejects(loadConfiguration(), /DARKVAULT_URL/);
+        for (const missing of ['', ' \t ']) {
+            process.env.DARKVAULT_URL = missing;
+            await assert.rejects(loadConfiguration(), /DARKVAULT_URL/);
+        }
+        process.env.DARKVAULT_URL = url;
+        await assert.rejects(loadConfiguration(undefined, options), DarkVaultError);
+        await assert.rejects(loadConfiguration(''), TypeError);
+        const controller = new AbortController(); controller.abort();
+        await assert.rejects(loadConfiguration(undefined, options, controller.signal), { name: 'AbortError' });
+        process.env.DARKVAULT_URL = 'invalid';
+        await assert.rejects(loadConfiguration(url, options), DarkVaultError);
+    } finally {
+        if (previous === undefined) delete process.env.DARKVAULT_URL;
+        else process.env.DARKVAULT_URL = previous;
+    }
+    const originalProcess = globalThis.process;
+    try {
+        globalThis.process = undefined;
+        await assert.rejects(loadConfiguration(), /pass a URL explicitly/);
+        await assert.rejects(loadConfiguration(url, options), DarkVaultError);
+    } finally {
+        globalThis.process = originalProcess;
+    }
 });

@@ -1,5 +1,6 @@
 import { encryptRequest, decryptResponse, parseStrict, readBounded } from './protocol.js';
 import { DarkVaultError } from './errors.js';
+import type { JWK } from 'jose';
 import { encodeScalar, parseScalar, typedSecrets, buildConfiguration } from './configuration.js';
 import type { SecretType, SecretScalar, Configuration } from './configuration.js';
 export * from './configuration.js';
@@ -19,6 +20,15 @@ export interface TokenInfo {
     creatableBucketNames: string[]; expiresAt: string | null;
 }
 export interface ClientOptions { timeoutMs?: number; fetch?: typeof globalThis.fetch }
+type ServerKey = { protocolVersion: number; serverId: string; kid: string; publicKey: JWK; notAfter: string };
+
+function retryAfterMs(value: string | null): number {
+    if (!value) return 0;
+    const seconds = Number(value);
+    if (Number.isFinite(seconds) && seconds >= 0) return Math.ceil(seconds * 1000);
+    const date = Date.parse(value);
+    return Number.isFinite(date) ? Math.max(0, date - Date.now()) : 0;
+}
 
 function revision(value: number): number {
     if (!Number.isSafeInteger(value) || value < 0) throw new TypeError('Revision must be a nonnegative safe integer.');
@@ -34,6 +44,8 @@ export class DarkVaultClient {
     readonly #token: string;
     readonly #fetch: typeof globalThis.fetch;
     readonly #timeout: number;
+    #serverKey?: ServerKey;
+    #serverKeyUntil = 0;
 
     #defaultBucket?: string;
     get defaultBucket(): string | undefined { return this.#defaultBucket; }
@@ -85,33 +97,53 @@ export class DarkVaultClient {
             }
             return response;
         };
-        const discovery = await fetchChecked('/api/v1/crypto/key', requestOptions);
-        if (!discovery.ok) { await discovery.body?.cancel(); throw new DarkVaultError('key_unavailable', discovery.status); }
-        const key = parseStrict(await readBounded(discovery));
-        const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-        if (!key || key.protocolVersion !== 1 || typeof key.serverId !== 'string' || typeof key.kid !== 'string' || typeof key.notAfter !== 'string' || !uuid.test(key.serverId) || !uuid.test(key.kid) ||
-            !Number.isFinite(Date.parse(key.notAfter)) || Date.parse(key.notAfter) <= Date.now() ||
-            key.publicKey?.kty !== 'EC' || key.publicKey?.crv !== 'P-256' ||
-            Object.keys(key.publicKey).sort().join(',') !== 'crv,kty,x,y') throw new DarkVaultError('invalid_server_key');
-        const request = await encryptRequest(key, operation, parameters, 'data');
-        deadline.throwIfAborted();
-        const response = await fetchChecked('/api/v1/execute', {
-            ...requestOptions, method: 'POST', body: request.body,
-            headers: { 'Authorization': `Bearer ${this.#token}`, 'Content-Type': 'application/jose', 'Accept': 'application/jose' }
-        });
-        if (response.headers.get('Content-Type')?.split(';')[0] !== 'application/jose') {
-            await response.body?.cancel();
-            throw new DarkVaultError('transport_error', response.status, request.payload.requestId);
-        }
-        let data: unknown;
-        try { data = await decryptResponse(await readBounded(response), request, response.status); }
-        catch (error) {
+        let keyRetry = false;
+        while (true) {
+            let key = this.#serverKey;
+            const now = Date.now();
+            if (!key || this.#serverKeyUntil <= now || Date.parse(key.notAfter) <= now) {
+                const discovery = await fetchChecked('/api/v1/crypto/key', requestOptions);
+                if (!discovery.ok) { await discovery.body?.cancel(); throw new DarkVaultError('key_unavailable', discovery.status); }
+                const candidate = parseStrict(await readBounded(discovery)) as ServerKey;
+                const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+                if (!candidate || candidate.protocolVersion !== 1 || typeof candidate.serverId !== 'string' || typeof candidate.kid !== 'string' || typeof candidate.notAfter !== 'string' || !uuid.test(candidate.serverId) || !uuid.test(candidate.kid) ||
+                    !Number.isFinite(Date.parse(candidate.notAfter)) || Date.parse(candidate.notAfter) <= Date.now() ||
+                    candidate.publicKey?.kty !== 'EC' || candidate.publicKey?.crv !== 'P-256' ||
+                    Object.keys(candidate.publicKey).sort().join(',') !== 'crv,kty,x,y') throw new DarkVaultError('invalid_server_key');
+                key = candidate;
+                this.#serverKey = key;
+                this.#serverKeyUntil = Math.min(Date.now() + 300_000, Date.parse(key.notAfter));
+            }
+            const request = await encryptRequest(key, operation, parameters, 'data');
             deadline.throwIfAborted();
-            if (error instanceof DarkVaultError) throw error;
-            throw new DarkVaultError('invalid_response', response.status, request.payload.requestId);
+            const response = await fetchChecked('/api/v1/execute', {
+                ...requestOptions, method: 'POST', body: request.body,
+                headers: { 'Authorization': `Bearer ${this.#token}`, 'Content-Type': 'application/jose', 'Accept': 'application/jose' }
+            });
+            if (response.headers.get('Content-Type')?.split(';')[0] !== 'application/jose') {
+                const body = await readBounded(response);
+                let code = 'transport_error';
+                try {
+                    const candidate = parseStrict(body) as { error?: { code?: unknown } };
+                    if (typeof candidate?.error?.code === 'string' && /^[a-z_]{1,64}$/.test(candidate.error.code)) code = candidate.error.code;
+                } catch { /* keep safe generic code */ }
+                const retryAfter = retryAfterMs(response.headers.get('Retry-After'));
+                if (code === 'unknown_key' && !keyRetry) {
+                    this.#serverKey = undefined; this.#serverKeyUntil = 0; keyRetry = true; continue;
+                }
+                if (response.ok) throw new DarkVaultError('unencrypted_response', response.status, request.payload.requestId, retryAfter);
+                throw new DarkVaultError(code, response.status, request.payload.requestId, retryAfter);
+            }
+            let data: unknown;
+            try { data = await decryptResponse(await readBounded(response), request, response.status); }
+            catch (error) {
+                deadline.throwIfAborted();
+                if (error instanceof DarkVaultError) throw error;
+                throw new DarkVaultError('invalid_response', response.status, request.payload.requestId);
+            }
+            deadline.throwIfAborted();
+            return data as T;
         }
-        deadline.throwIfAborted();
-        return data as T;
     }
 
     addBucket(name: string, description = '', signal?: AbortSignal): Promise<Bucket> { return this.execute('bucket.create', { name, description }, signal); }
@@ -134,7 +166,13 @@ export class DarkVaultClient {
     getTokenInfo(signal?: AbortSignal): Promise<TokenInfo> { return this.execute('token.info', {}, signal); }
 }
 
-/** Load one nested configuration snapshot; environment variables remain caller-owned. */
-export async function loadConfiguration(url: string, options: ClientOptions = {}, signal?: AbortSignal): Promise<Configuration> {
+/** Load one nested configuration snapshot; an omitted URL reads DARKVAULT_URL in Node.js. */
+export async function loadConfiguration(url?: string, options: ClientOptions = {}, signal?: AbortSignal): Promise<Configuration> {
+    if (url === undefined) {
+        url = (globalThis as { process?: { env?: Record<string, string | undefined> } }).process?.env?.DARKVAULT_URL;
+        if (typeof url !== 'string' || !url.trim()) {
+            throw new TypeError('Set DARKVAULT_URL in the process environment or pass a URL explicitly (required in browsers).');
+        }
+    }
     return DarkVaultClient.fromUrl(url, options).readConfiguration(undefined, true, signal);
 }

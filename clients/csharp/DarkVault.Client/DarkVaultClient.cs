@@ -35,6 +35,15 @@ public sealed class DarkVaultClient : IDisposable {
         return new DarkVaultClient(origin.AbsoluteUri, match.Groups[1].Value, httpClient) { DefaultBucket = match.Groups[3].Value };
     }
 
+    public static Task<T> LoadConfigurationAsync<T>(
+        System.Text.Json.Serialization.Metadata.JsonTypeInfo<T> typeInfo,
+        CancellationToken cancellationToken = default, HttpClient? httpClient = null) {
+        var url = Environment.GetEnvironmentVariable("DARKVAULT_URL");
+        if (string.IsNullOrWhiteSpace(url))
+            throw new InvalidOperationException("Set DARKVAULT_URL in the process environment before loading DarkVault configuration.");
+        return LoadConfigurationAsync(url, typeInfo, cancellationToken, httpClient);
+    }
+
     public static async Task<T> LoadConfigurationAsync<T>(string url,
         System.Text.Json.Serialization.Metadata.JsonTypeInfo<T> typeInfo,
         CancellationToken cancellationToken = default, HttpClient? httpClient = null) {

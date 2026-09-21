@@ -133,7 +133,7 @@ failure, read current state before repeating it.
 
 ## Build from source
 
-With Go 1.25+, from the repository root:
+With Go 1.26+, from the repository root:
 
 ```sh
 go -C cli build -trimpath -o ../artifacts/darkvault .

@@ -15,7 +15,7 @@ func TestConnectionStrings(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if c.DefaultBucket != "qa" || c.Token != token || c.URL != "https://"+host {
+		if c.DefaultBucket != "qa" || c.Token() != token || c.URL != "https://"+host {
 			t.Fatal("incorrect connection")
 		}
 		c.HTTP = &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
@@ -55,5 +55,19 @@ func TestConnectionStrings(t *testing.T) {
 	c, _ := New("vault.example.com", token)
 	if _, err := c.ReadBucket(context.Background(), ""); err == nil {
 		t.Fatal("missing bucket accepted")
+	}
+}
+
+func TestConfigurationEnvironmentValidation(t *testing.T) {
+	var config map[string]any
+	for _, value := range []string{"", " \t "} {
+		t.Setenv("DARKVAULT_URL", value)
+		if err := LoadConfigurationFromEnv(context.Background(), &config); err == nil || !strings.Contains(err.Error(), "DARKVAULT_URL") {
+			t.Fatal("missing environment was not reported")
+		}
+	}
+	t.Setenv("DARKVAULT_URL", "invalid")
+	if err := LoadConfigurationFromEnv(context.Background(), &config); err == nil {
+		t.Fatal("invalid environment accepted")
 	}
 }

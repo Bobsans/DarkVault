@@ -92,7 +92,7 @@ Open `https://vault.example.com`, sign in as `admin`, create a bucket such as
 Reading the complete bucket requires `bucket:read`, `secret:read`, and `secret:list`.
 
 Store that token in your deployment's protected secret source. Examples below read
-`DARKVAULT_TOKEN` explicitly; SDKs do not load environment variables automatically.
+`DARKVAULT_TOKEN` explicitly; client constructors and URL factories receive credentials explicitly. Configuration loading helpers can read DARKVAULT_URL.
 
 ### 4. Connect your application
 
@@ -135,7 +135,7 @@ var builder = WebApplication.CreateBuilder(args);
 var token = Environment.GetEnvironmentVariable("DARKVAULT_TOKEN")
     ?? throw new InvalidOperationException("DARKVAULT_TOKEN is required");
 
-await builder.Configuration.AddFromDarkVaultBucketAsync(
+await builder.Configuration.AddFromDarkVaultAsync(
     "https://vault.example.com",
     token,
     "app_prod"
@@ -211,8 +211,7 @@ All four SDKs accept the same format through an explicit factory:
 `DarkVaultClient.FromUrl` (C#),
 `DarkVaultClient.from_url` (Python),
 `DarkVaultClient.fromUrl` (TypeScript), and
-`darkvault.NewFromURL` (Go). SDKs do not read the environment
-automatically. The .NET configuration extension accepts the string directly:
+`darkvault.NewFromURL` (Go). Client constructors and URL factories do not read the environment. The .NET configuration extension accepts the string directly:
 `builder.Configuration.AddFromDarkVault(connection)` (or `await builder.Configuration.AddFromDarkVaultAsync(connection)`).
 
 See the SDK READMEs and [CLI precedence and syntax](docs/operations.md#строка-подключения).
@@ -230,3 +229,21 @@ See the SDK READMEs and [CLI precedence and syntax](docs/operations.md#стро�
 
 Each call loads once. SDK helpers return/bind typed nested settings; the ASP.NET
 extension adds them through the existing configuration provider behavior.
+
+The ASP.NET extension can read `DARKVAULT_URL` directly:
+`await builder.Configuration.AddFromDarkVaultAsync()` or
+`builder.Configuration.AddFromDarkVault()`. Missing or blank values fail with
+a clear error. The request deadline is 30 seconds; cancellation tokens are
+supported. Load any `.env` file into the process environment beforehand.
+
+### Load settings from DARKVAULT_URL
+
+| SDK | Call |
+| --- | --- |
+| C# | `await DarkVaultClient.LoadConfigurationAsync(SettingsJsonContext.Default.AppSettings)` |
+| Python | `load_configuration()` |
+| TypeScript (Node.js) | `await loadConfiguration()` |
+| Go | `darkvault.LoadConfigurationFromEnv(ctx, &settings)` |
+
+Missing or blank environment values fail clearly. Explicit URLs take precedence.
+The SDKs do not load `.env` files. Browser callers must supply the URL explicitly.

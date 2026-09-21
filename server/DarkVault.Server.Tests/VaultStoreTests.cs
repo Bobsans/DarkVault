@@ -131,6 +131,16 @@ public sealed class VaultStoreTests {
         Assert.Throws<InvalidOperationException>(() => new KeyRing(Path.Combine(directory, "missing"), false));
     }
     [Test]
+    public void CorruptActiveDataKeyIsRejectedBeforeOpeningTheStore() {
+        var path = Path.Combine(directory, "broken-keyring.json");
+        using (new KeyRing(path, true)) { }
+        var json = File.ReadAllText(path);
+        using var document = JsonDocument.Parse(json);
+        var active = document.RootElement.GetProperty("activeData").GetString()!;
+        File.WriteAllText(path, json.Replace("\"activeData\":\"" + active + "\"", "\"activeData\":\"missing-active-data\"", StringComparison.Ordinal));
+        Assert.Throws<CryptographicException>(() => new KeyRing(path, false));
+    }
+    [Test]
     public void ReplayPersistsAcrossRestart() {
         using var reply = ECDsa.Create(ECCurve.NamedCurves.nistP256);
         var request = new VaultRequest(1, Guid.NewGuid().ToString(), DateTimeOffset.UtcNow, ring.ServerId, "admin", "bucket.list", JsonSerializer.SerializeToElement(new { }), Wire.Export(reply));
@@ -277,6 +287,19 @@ public sealed class VaultStoreTests {
             Assert.That(read.SelectMany(e => e.GetProperty("details").GetProperty("resources").EnumerateArray()).Count(), Is.EqualTo(205));
             Assert.That(read.All(e => e.GetProperty("details").GetProperty("returnedCount").GetInt32() == 205), Is.True);
         }
+    }
+    [Test]
+    public void SqlPaginationPreservesBucketAndTokenPages() {
+        for (var i = 0; i < 3; i++) Run<Bucket>("bucket.create", new { name = "page" + i });
+        var firstBuckets = Run<Page<Bucket>>("bucket.list", new { limit = 2 });
+        Assert.That(firstBuckets.Items, Has.Count.EqualTo(2)); Assert.That(firstBuckets.NextCursor, Is.Not.Null);
+        var lastBuckets = Run<Page<Bucket>>("bucket.list", new { limit = 2, cursor = firstBuckets.NextCursor });
+        Assert.That(lastBuckets.Items, Has.Count.EqualTo(1)); Assert.That(lastBuckets.NextCursor, Is.Null);
+        for (var i = 0; i < 3; i++) Token([], []);
+        var firstTokens = Run<Page<VaultStore.TokenRecord>>("token.list", new { limit = 2 });
+        Assert.That(firstTokens.Items, Has.Count.EqualTo(2)); Assert.That(firstTokens.NextCursor, Is.Not.Null);
+        var lastTokens = Run<Page<VaultStore.TokenRecord>>("token.list", new { limit = 2, cursor = firstTokens.NextCursor });
+        Assert.That(lastTokens.Items, Has.Count.EqualTo(1)); Assert.That(lastTokens.NextCursor, Is.Null);
     }
     [Test]
     public void LimitsAndPaginationDoNotLeakValues() {

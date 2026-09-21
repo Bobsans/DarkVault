@@ -205,7 +205,7 @@ required. Bucket names use 1–63 lowercase letters, digits, `_` or `-`, startin
 with a letter or digit. Additional paths, query strings, fragments and passwords
 are rejected. Use the literal token and bucket name without percent encoding.
 
-The SDK does not read environment variables automatically. The factory separates
+The client constructor and URL factory do not read environment variables. The factory separates
 the token from the HTTPS origin before making requests. Treat the entire string
 as a secret. Existing constructors and explicit bucket arguments still work.
 The default bucket is used for bucket/configuration reads when omitted; other
@@ -230,3 +230,17 @@ Supply your source-generated `JsonTypeInfo<T>`, as for `ReadConfigurationAsync`,
 to preserve Native AOT support. The helper loads one typed, nested snapshot and
 disposes its client. An optional cancellation token and caller-owned
 `HttpClient` are supported.
+
+## Load settings from the environment
+
+```csharp
+var settings = await DarkVaultClient.LoadConfigurationAsync(
+    SettingsJsonContext.Default.AppSettings);
+```
+
+The overload without a URL reads `DARKVAULT_URL`. It accepts the same optional
+cancellation token and caller-owned `HttpClient`.
+
+Missing or whitespace-only `DARKVAULT_URL` produces a clear error. An explicit
+URL is used independently of the environment. The SDK does not load `.env` files;
+load one beforehand if needed. Existing timeouts and cancellation behavior apply.

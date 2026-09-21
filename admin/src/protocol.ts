@@ -8,7 +8,7 @@ export async function execute<T = unknown>(operation: string, parameters: object
   const key = parseStrict(await readBounded(discovery));
   if (key.protocolVersion !== 1 || Date.parse(key.notAfter) <= Date.now()) throw new Error('Invalid server key');
   const request = await encryptRequest(key, operation, parameters);
-  const response = await fetch('/admin/api/v1/execute', { method: 'POST', signal, redirect: 'error', headers: { 'Content-Type': 'application/jose', 'X-CSRF-Token': csrfToken }, body: request.body });
+  const response = await fetch('/admin/api/v1/execute', { method: 'POST', signal, redirect: 'error', headers: { 'Content-Type': 'application/jose', 'Accept': 'application/jose', 'X-CSRF-Token': csrfToken }, body: request.body });
   const body = await readBounded(response);
   if (response.headers.get('Content-Type')?.split(';')[0] !== 'application/jose') throw new Error(response.status === 401 ? 'Session expired. Sign in again.' : 'Request rejected');
   return await decryptResponse(body, request, response.status) as T;

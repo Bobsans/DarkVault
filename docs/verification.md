@@ -4,7 +4,7 @@
 pwsh tools/verify.ps1
 ```
 
-Требования: .NET 10 SDK, Go 1.25+, Python 3.11+, Node.js 22+, pnpm 11 и PowerShell 7.
+Требования: .NET 10 SDK, Go SDK 1.25+, CLI Go 1.26+, Python 3.11+, Node.js 22+, pnpm 11 и PowerShell 7.
 Для уже установленных frontend-зависимостей можно передать `-SkipInstall`;
 параметры `-Node`, `-Pnpm` и `-Python` позволяют указать путь к инструментам.
 Для сборки Python создаётся `artifacts/python-env`, а wheel устанавливается

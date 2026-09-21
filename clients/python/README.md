@@ -230,7 +230,7 @@ required. Bucket names use 1–63 lowercase letters, digits, `_` or `-`, startin
 with a letter or digit. Additional paths, query strings, fragments and passwords
 are rejected. Use the literal token and bucket name without percent encoding.
 
-The SDK does not read environment variables automatically. The factory separates
+The client constructor and URL factory do not read environment variables. The factory separates
 the token from the HTTPS origin before making requests. Treat the entire string
 as a secret. Existing constructors and explicit bucket arguments still work.
 The default bucket is used for bucket/configuration reads when omitted; other
@@ -262,3 +262,16 @@ load; reuse a client when making repeated calls.
 ## Rename a bucket
 
 `rename_bucket(bucket, name, expected_revision)` renames a bucket with `bucket:write` and its current revision. Its ID, secrets, description, and token access are preserved. Update the bucket name in application configuration after renaming.
+
+## Load settings from the environment
+
+```python
+settings = load_configuration()
+```
+
+Omitting `url` (or passing `None`) reads `DARKVAULT_URL`. An explicitly empty URL
+is rejected instead of silently using the environment.
+
+Missing or whitespace-only `DARKVAULT_URL` produces a clear error. An explicit
+URL is used independently of the environment. The SDK does not load `.env` files;
+load one beforehand if needed. Existing timeouts and cancellation behavior apply.

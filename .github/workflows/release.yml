@@ -27,32 +27,32 @@ jobs:
       run:
         shell: pwsh
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: actions/setup-dotnet@v6
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
         with:
           dotnet-version: '10.0.x'
           architecture: ${{ matrix.arch }}
-      - uses: actions/setup-go@v7
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: stable
           architecture: ${{ matrix.arch }}
           cache-dependency-path: |
             cli/go.sum
             clients/go/go.sum
-      - uses: actions/setup-node@v7
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: '22'
           architecture: ${{ matrix.arch }}
-      - uses: actions/setup-python@v7
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: '3.13'
           architecture: ${{ matrix.python-arch }}
           cache: pip
           cache-dependency-path: clients/python/pyproject.toml
       - name: Install frontend package manager
-        run: npm install --global pnpm@11
+        run: npm install --global --ignore-scripts pnpm@11.27.1
       - name: Install Linux Native AOT toolchain
         if: runner.os == 'Linux'
         run: |
@@ -69,7 +69,7 @@ jobs:
         run: ./tools/package-native-server.ps1 -Tag $env:RELEASE_TAG -Runtime '${{ matrix.runtime }}'
       - name: Preserve native server archive
         if: startsWith(github.ref, 'refs/tags/v')
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: native-server-${{ matrix.runtime }}
           if-no-files-found: error
@@ -84,9 +84,16 @@ jobs:
           $vulnerable = @($audit.projects.frameworks.topLevelPackages) + @($audit.projects.frameworks.transitivePackages)
           if (@($vulnerable | Where-Object { $_.vulnerabilities }).Count -ne 0) { throw "Vulnerable NuGet dependencies found" }
           Push-Location cli
-          try { go run golang.org/x/vuln/cmd/govulncheck@v1.7.0 ./... } finally { Pop-Location }
+          try { go run golang.org/x/vuln/cmd/govulncheck@617f44b718537dccdea1915395650e0529e3b72e ./... } finally { Pop-Location }
           Push-Location clients/go
-          try { go run golang.org/x/vuln/cmd/govulncheck@v1.7.0 ./... } finally { Pop-Location }
+          try { go run golang.org/x/vuln/cmd/govulncheck@617f44b718537dccdea1915395650e0529e3b72e ./... } finally { Pop-Location }
+
+      - name: Audit JavaScript and Python dependencies
+        run: |
+          pnpm --dir clients/typescript audit --audit-level high
+          pnpm --dir admin audit --audit-level high
+          python -m pip install pip-audit==2.10.1
+          python -m pip_audit --strict --path artifacts/python-env
 
   release:
     if: startsWith(github.ref, 'refs/tags/v')
@@ -105,29 +112,29 @@ jobs:
     env:
       RELEASE_TAG: ${{ github.ref_name }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: actions/setup-dotnet@v6
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
         with:
           dotnet-version: '10.0.x'
-      - uses: actions/setup-go@v7
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: stable
           cache-dependency-path: |
             cli/go.sum
             clients/go/go.sum
-      - uses: actions/setup-python@v7
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: '3.11'
       - name: Install Python build tool
-        run: python -m pip install build
-      - uses: actions/setup-node@v7
+        run: python -m pip install build==1.6.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: '22'
       - name: Install SDK package manager
-        run: npm install --global pnpm@11
-      - uses: actions/download-artifact@v8
+        run: npm install --global --ignore-scripts pnpm@11.27.1
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           pattern: native-server-*
           merge-multiple: true
@@ -137,7 +144,7 @@ jobs:
       - name: Verify release versions and checksums
         run: python tools/check-release.py "artifacts/releases/$env:RELEASE_TAG/assets" $env:RELEASE_TAG (git rev-parse HEAD)
       - name: Preserve verified registry packages
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: registry-packages
           if-no-files-found: error
@@ -167,7 +174,7 @@ jobs:
       contents: read
       id-token: write
     steps:
-      - uses: actions/download-artifact@v8
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: registry-packages
           path: packages
@@ -175,7 +182,7 @@ jobs:
         run: |
           mkdir dist
           cp packages/*.whl packages/darkvault_client-*.tar.gz dist/
-      - uses: pypa/gh-action-pypi-publish@release/v1
+      - uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # release/v1
         with:
           skip-existing: true
 
@@ -187,21 +194,34 @@ jobs:
       contents: read
       id-token: write
     steps:
-      - uses: actions/download-artifact@v8
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: registry-packages
           path: packages
-      - uses: actions/setup-dotnet@v6
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
         with:
           dotnet-version: '10.0.x'
-      - uses: NuGet/login@v1
+      - uses: NuGet/login@8d196754b4036150537f80ac539e15c2f1028841 # v1
         id: login
         with:
           user: ${{ vars.NUGET_USER }}
       - name: Publish both NuGet packages
+        shell: bash
         env:
           NUGET_API_KEY: ${{ steps.login.outputs.NUGET_API_KEY }}
-        run: dotnet nuget push "packages/*.nupkg" --api-key "$NUGET_API_KEY" --source https://api.nuget.org/v3/index.json --skip-duplicate
+        run: |
+          shopt -s nullglob
+          packages=(packages/*.nupkg)
+          if [ "${#packages[@]}" -ne 2 ]; then
+            echo "Expected exactly two NuGet packages, found ${#packages[@]}" >&2
+            exit 1
+          fi
+          for package in "${packages[@]}"; do
+            dotnet nuget push "$package" \
+              --api-key "$NUGET_API_KEY" \
+              --source https://api.nuget.org/v3/index.json \
+              --skip-duplicate
+          done
 
   publish-npm:
     needs: release
@@ -211,18 +231,18 @@ jobs:
       contents: read
       id-token: write
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: actions/download-artifact@v8
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: registry-packages
           path: packages
-      - uses: actions/setup-node@v7
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: '22'
       - name: Install npm with OIDC support
-        run: npm install --global npm@11
+        run: npm install --global --ignore-scripts npm@11.19.1
       - name: Publish verified npm archive
         env:
           RELEASE_TAG: ${{ github.ref_name }}

@@ -243,7 +243,7 @@ required. Bucket names use 1–63 lowercase letters, digits, `_` or `-`, startin
 with a letter or digit. Additional paths, query strings, fragments and passwords
 are rejected. Use the literal token and bucket name without percent encoding.
 
-The SDK does not read environment variables automatically. The factory separates
+The client constructor and URL factory do not read environment variables. The factory separates
 the token from the HTTPS origin before making requests. Treat the entire string
 as a secret. Existing constructors and explicit bucket arguments still work.
 The default bucket is used for bucket/configuration reads when omitted; other
@@ -277,3 +277,16 @@ trust store; create a client explicitly for a custom transport.
 ## Rename a bucket
 
 `RenameBucket(ctx, bucket, name, expectedRevision)` renames a bucket with `bucket:write` and its current revision. Its ID, secrets, description, and token access are preserved. Update the bucket name in application configuration after renaming.
+
+## Load settings from the environment
+
+```go
+err := darkvault.LoadConfigurationFromEnv(ctx, &settings)
+```
+
+Go has no overloads, so a separate helper reads `DARKVAULT_URL` and delegates to
+`LoadConfiguration`.
+
+Missing or whitespace-only `DARKVAULT_URL` produces a clear error. An explicit
+URL is used independently of the environment. The SDK does not load `.env` files;
+load one beforehand if needed. Existing timeouts and cancellation behavior apply.

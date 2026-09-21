@@ -15,7 +15,7 @@ using NUnit.Framework;
 namespace DarkVault.Server.Tests;
 
 public sealed class HttpTests {
-    [Test]
+    [Test, NonParallelizable]
     public async Task HttpsSdkAndAdminAuthenticationWorkEndToEnd() {
         var directory = Path.Combine(Path.GetTempPath(), "dv-http-" + Guid.NewGuid()); Directory.CreateDirectory(directory);
         using var rsa = RSA.Create(2048);
@@ -62,7 +62,7 @@ public sealed class HttpTests {
             var connectionUrl = url.Replace("https://", "https://" + token + "@") + "/qa";
             using var connectionClient = DarkVaultClient.FromUrl(connectionUrl, http);
             Assert.That((await connectionClient.ReadBucketAsync())["ConnectionStrings:Main"], Is.EqualTo("秘密\nvalue"));
-            var configuration = new ConfigurationBuilder(); await configuration.AddFromDarkVaultBucketAsync(client, "qa");
+            var configuration = new ConfigurationBuilder(); await configuration.AddFromDarkVaultAsync(client, "qa");
             Assert.That(configuration.Build()["ConnectionStrings:Main"], Is.EqualTo("秘密\nvalue"));
             await client.AddSecretAsync("qa", "Redis:Port", SecretValues.Parse("6379", "number"));
             await client.AddSecretAsync("qa", "Redis:Enabled", SecretValues.Parse("false", "boolean"));
@@ -70,7 +70,7 @@ public sealed class HttpTests {
             var typedConfig = await client.ReadConfigurationAsync("qa", Wire.TypeInfo<JsonElement>());
             Assert.That(typedConfig.GetProperty("Redis").GetProperty("Port").GetInt32(), Is.EqualTo(6379));
             Assert.That(typedConfig.GetProperty("Redis").GetProperty("Enabled").GetBoolean(), Is.False);
-            var stringConfig = new ConfigurationBuilder(); await stringConfig.AddFromDarkVaultBucketAsync(client, "qa");
+            var stringConfig = new ConfigurationBuilder(); await stringConfig.AddFromDarkVaultAsync(client, "qa");
             Assert.That(stringConfig.Build()["Redis:Port"], Is.EqualTo("6379"));
             Assert.That(stringConfig.Build()["Redis:Optional"], Is.Null);
             var loaded = await DarkVaultClient.LoadConfigurationAsync(connectionUrl, Wire.TypeInfo<JsonElement>(), httpClient: http);
@@ -82,13 +82,44 @@ public sealed class HttpTests {
             var asyncConfiguration = new ConfigurationBuilder();
             Assert.That(await asyncConfiguration.AddFromDarkVaultAsync(connectionUrl, httpClient: http), Is.SameAs(asyncConfiguration));
             Assert.That(asyncConfiguration.Build()["Redis:Enabled"], Is.EqualTo("false"));
+            var previousUrl = Environment.GetEnvironmentVariable("DARKVAULT_URL");
+            try {
+                foreach (var missing in new string?[] { null, "", " \t " }) {
+                    Environment.SetEnvironmentVariable("DARKVAULT_URL", missing);
+                    var missingConfiguration = new ConfigurationBuilder();
+                    Assert.That(Assert.Throws<InvalidOperationException>(() => missingConfiguration.AddFromDarkVault())!.Message,
+                        Does.Contain("DARKVAULT_URL"));
+                    Assert.ThrowsAsync<InvalidOperationException>(async () => await missingConfiguration.AddFromDarkVaultAsync());
+                    Assert.That(missingConfiguration.Sources, Is.Empty);
+                    Assert.ThrowsAsync<InvalidOperationException>(async () => await DarkVaultClient.LoadConfigurationAsync(Wire.TypeInfo<JsonElement>()));
+                }
+                Environment.SetEnvironmentVariable("DARKVAULT_URL", connectionUrl);
+                var environmentSettings = await DarkVaultClient.LoadConfigurationAsync(Wire.TypeInfo<JsonElement>(), httpClient: http);
+                Assert.That(environmentSettings.GetProperty("Redis").GetProperty("Port").GetInt32(), Is.EqualTo(6379));
+                var environmentConfiguration = new ConfigurationBuilder();
+                environmentConfiguration.AddFromDarkVault(httpClient: http);
+                Assert.That(environmentConfiguration.Build()["Redis:Port"], Is.EqualTo("6379"));
+                var asyncEnvironmentConfiguration = new ConfigurationBuilder();
+                await asyncEnvironmentConfiguration.AddFromDarkVaultAsync(httpClient: http);
+                Assert.That(asyncEnvironmentConfiguration.Build()["Redis:Enabled"], Is.EqualTo("false"));
+                using var environmentCancelled = new CancellationTokenSource(); environmentCancelled.Cancel();
+                Assert.CatchAsync<OperationCanceledException>(async () =>
+                    await new ConfigurationBuilder().AddFromDarkVaultAsync(environmentCancelled.Token, http));
+                Assert.CatchAsync<OperationCanceledException>(async () =>
+                    await DarkVaultClient.LoadConfigurationAsync(Wire.TypeInfo<JsonElement>(), environmentCancelled.Token, http));
+                Environment.SetEnvironmentVariable("DARKVAULT_URL", "invalid");
+                await DarkVaultClient.LoadConfigurationAsync(connectionUrl, Wire.TypeInfo<JsonElement>(), httpClient: http);
+                await new ConfigurationBuilder().AddFromDarkVaultAsync(connectionUrl, httpClient: http);
+            } finally {
+                Environment.SetEnvironmentVariable("DARKVAULT_URL", previousUrl);
+            }
             using var cancelled = new CancellationTokenSource(); cancelled.Cancel();
             Assert.CatchAsync<OperationCanceledException>(async () => await new ConfigurationBuilder().AddFromDarkVaultAsync(connectionUrl, cancelled.Token, http));
             var updated = await client.UpdateSecretAsync("qa", secret.Key, "updated", secret.Revision);
             Assert.That((await client.ReadSecretAsync("qa", secret.Key)).Value, Is.EqualTo("updated"));
             Assert.ThrowsAsync<DarkVaultException>(async () => await client.DeleteSecretAsync("qa", secret.Key, secret.Revision));
             await client.AddSecretAsync("qa", "case", "a"); await client.AddSecretAsync("qa", "CASE", "b");
-            var empty = new ConfigurationBuilder(); Assert.ThrowsAsync<InvalidOperationException>(async () => await empty.AddFromDarkVaultBucketAsync(client, "qa")); Assert.That(empty.Sources, Is.Empty);
+            var empty = new ConfigurationBuilder(); Assert.ThrowsAsync<InvalidOperationException>(async () => await empty.AddFromDarkVaultAsync(client, "qa")); Assert.That(empty.Sources, Is.Empty);
             var rejectedConfiguration = new ConfigurationBuilder();
             Assert.Throws<InvalidOperationException>(() => rejectedConfiguration.AddFromDarkVault(connectionUrl, httpClient: http));
             Assert.That(rejectedConfiguration.Sources, Is.Empty);

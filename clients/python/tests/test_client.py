@@ -114,6 +114,21 @@ class ClientTests(unittest.TestCase):
                     self.assertEqual(load_configuration(url), self.data["secrets"])
             self.assertTrue(client._closed)
 
+    def test_load_configuration_from_environment(self):
+        with patch.dict(os.environ, {}, clear=True):
+            with self.assertRaisesRegex(ValueError, "DARKVAULT_URL"):
+                load_configuration()
+        for missing in ("", " \t "):
+            with patch.dict(os.environ, {"DARKVAULT_URL": missing}), self.assertRaisesRegex(ValueError, "DARKVAULT_URL"):
+                load_configuration()
+        url = f"https://{TOKEN}@vault.example.com/qa"
+        with patch.dict(os.environ, {"DARKVAULT_URL": url}), patch.object(DarkVaultClient, "_http", side_effect=self.respond):
+            self.assertEqual(load_configuration(), self.data["secrets"])
+            with self.assertRaises(ValueError):
+                load_configuration("")
+        with patch.dict(os.environ, {"DARKVAULT_URL": "invalid"}), patch.object(DarkVaultClient, "_http", side_effect=self.respond):
+            self.assertEqual(load_configuration(url), self.data["secrets"])
+
     def test_bucket_reads_and_key_cache(self):
         with patch.object(self.client, "_http", side_effect=self.respond) as transport:
             self.assertEqual(self.client.read_bucket("qa"), self.data["secrets"])
@@ -291,6 +306,8 @@ class LiveTests(unittest.TestCase):
             self.assertEqual(vault.read_bucket(name)["Redis:Optional"], "null")
             self.assertEqual(vault.read_configuration(name)["Redis"]["Port"], 6379)
             config = load_configuration(descriptor["url"].replace("https://", "https://" + token + "@") + "/" + name, ssl_context=context)
+            with patch.dict(os.environ, {"DARKVAULT_URL": descriptor["url"].replace("https://", "https://" + token + "@") + "/" + name}):
+                self.assertEqual(load_configuration(ssl_context=context), config)
             self.assertEqual(config["Redis"]["Port"], 6379)
             self.assertIsNone(config["Redis"]["Optional"])
             vault.update_secret(name, flag["key"], True, flag["revision"])
