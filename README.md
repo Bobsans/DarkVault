@@ -199,3 +199,34 @@ Found a rough edge or have an integration idea? [Open an issue](https://github.c
 If DarkVault helps you, **star the repository** so other developers can discover it.
 
 Released under the [MIT license](LICENSE).
+
+## One-variable connection
+
+CLI reads `DARKVAULT_URL` in the form
+`https://<token>@vault.site.com/bucket-name`. Store the entire value as a CI secret.
+With it, use `darkvault bucket read`, `darkvault secret get ApiKey` or
+`darkvault exec -- dotnet MyApp.dll` without repeating the bucket.
+
+All four SDKs accept the same format through an explicit factory:
+`DarkVaultClient.FromUrl` (C#),
+`DarkVaultClient.from_url` (Python),
+`DarkVaultClient.fromUrl` (TypeScript), and
+`darkvault.NewFromURL` (Go). SDKs do not read the environment
+automatically. The .NET configuration extension accepts the string directly:
+`builder.Configuration.AddFromDarkVault(connection)` (or `await builder.Configuration.AddFromDarkVaultAsync(connection)`).
+
+See the SDK READMEs and [CLI precedence and syntax](docs/operations.md#строка-подключения).
+
+### Load settings in one call
+
+| Platform | Call |
+| --- | --- |
+| ASP.NET Core | `builder.Configuration.AddFromDarkVault(url)` |
+| ASP.NET Core, async | `await builder.Configuration.AddFromDarkVaultAsync(url)` |
+| C# typed settings | `await DarkVaultClient.LoadConfigurationAsync(url, SettingsJsonContext.Default.AppSettings)` |
+| Python | `settings = load_configuration(url)` |
+| TypeScript | `const settings = await loadConfiguration(url)` |
+| Go | `err := darkvault.LoadConfiguration(ctx, url, &settings)` |
+
+Each call loads once. SDK helpers return/bind typed nested settings; the ASP.NET
+extension adds them through the existing configuration provider behavior.

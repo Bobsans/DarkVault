@@ -68,6 +68,39 @@ public sealed class VaultStoreTests {
         }
     }
     [Test]
+    public void BucketRenamePreservesIdentityAccessAndSecretsAndRejectsConflicts() {
+        var bucket = Run<Bucket>("bucket.create", new { name = "qa", description = "Keep this" });
+        var other = Run<Bucket>("bucket.create", new { name = "prod" });
+        var secret = Run<SecretMetadata>("secret.create", new { bucket = "qa", key = "key", value = "secret" });
+        var token = Token(["bucket:write", "bucket:read", "secret:read"], [bucket.Id]);
+        var principal = store.Authenticate(token);
+        var reader = store.Authenticate(Token(["bucket:read"], [bucket.Id]));
+        Assert.That(Assert.Throws<VaultFault>(() => Run<Bucket>("bucket.update", new { bucket = "qa", name = "renamed", expectedRevision = secret.Revision }, reader))!.Status, Is.EqualTo(403));
+        Assert.That(Assert.Throws<VaultFault>(() => Run<Bucket>("bucket.update", new { bucket = "prod", name = "renamed", expectedRevision = other.Revision }, principal))!.Status, Is.EqualTo(404));
+        Assert.That(Assert.Throws<VaultFault>(() => Run<Bucket>("bucket.update", new { bucket = "qa", name = "renamed", expectedRevision = bucket.Revision }, principal))!.Code, Is.EqualTo("revision_conflict"));
+        Assert.That(Assert.Throws<VaultFault>(() => Run<Bucket>("bucket.update", new { bucket = "qa", name = "prod", description = "Must not change", expectedRevision = secret.Revision }, principal))!.Code, Is.EqualTo("already_exists"));
+        foreach (var name in new string?[] { "", "Invalid", "bad/name", "qa\n", new('a', 64), null }) {
+            Assert.That(Assert.Throws<VaultFault>(() => Run<Bucket>("bucket.update", new { bucket = "qa", name, expectedRevision = secret.Revision }, principal))!.Status, Is.EqualTo(400));
+        }
+        var unchanged = Run<Bucket>("bucket.get", new { bucket = "qa" });
+        Assert.That(unchanged.Description, Is.EqualTo("Keep this"));
+        Assert.That(unchanged.Revision, Is.EqualTo(secret.Revision));
+        var renamed = Run<Bucket>("bucket.update", new { bucket = "qa", name = "renamed", expectedRevision = secret.Revision }, principal);
+        Assert.That(renamed.Id, Is.EqualTo(bucket.Id));
+        Assert.That(renamed.CreatedAt, Is.EqualTo(bucket.CreatedAt));
+        Assert.That(renamed.Description, Is.EqualTo(bucket.Description));
+        Assert.That(renamed.Revision, Is.GreaterThan(secret.Revision));
+        Assert.That(store.Authenticate(token).Token!.BucketIds, Is.EqualTo(new[] { bucket.Id }));
+        Assert.That(Assert.Throws<VaultFault>(() => Run<Bucket>("bucket.get", new { bucket = "qa" }))!.Status, Is.EqualTo(404));
+        var read = Run<Secret>("secret.read", new { bucket = "renamed", key = "key" }, store.Authenticate(token));
+        Assert.That(read.Id, Is.EqualTo(secret.Id)); Assert.That(read.Revision, Is.EqualTo(secret.Revision)); Assert.That(read.Value, Is.EqualTo("secret"));
+        renamed = Run<Bucket>("bucket.update", new { bucket = "renamed", name = "renamed", description = "Updated", expectedRevision = renamed.Revision }, principal);
+        store.Dispose(); store = new(Path.Combine(directory, "vault.db"), ring);
+        Assert.That(Run<Bucket>("bucket.get", new { bucket = "renamed" }).Description, Is.EqualTo("Updated"));
+        Run<Bucket>("bucket.create", new { name = "qa" });
+        Assert.That(Assert.Throws<VaultFault>(() => Run<Bucket>("bucket.get", new { bucket = "qa" }, store.Authenticate(token)))!.Status, Is.EqualTo(404));
+    }
+    [Test]
     public void RevisionCreateGrantAndRecursiveDeleteAreAtomic() {
         var token = Token(VaultStore.Scopes, [], names: ["qa"]); var p = store.Authenticate(token);
         var b = Run<Bucket>("bucket.create", new { name = "qa" }, p); p = store.Authenticate(token);
@@ -116,7 +149,7 @@ public sealed class VaultStoreTests {
         Assert.That(Run<BucketSnapshot>("bucket.read", new { bucket = "qa" }).Secrets, Is.Empty);
     }
     [Test]
-    public void InvalidPaginationAndMissingDescriptionAreRejected() {
+    public void InvalidPaginationAndMissingBucketChangesAreRejected() {
         var b = Run<Bucket>("bucket.create", new { name = "qa" });
         Assert.Throws<VaultFault>(() => Run<JsonElement>("bucket.list", new { limit = "100" }));
         Assert.Throws<VaultFault>(() => Run<JsonElement>("bucket.update", new { bucket = "qa", expectedRevision = b.Revision }));

@@ -243,9 +243,13 @@ public sealed partial class VaultStore : IDisposable {
                 Types(bucket.Id));
         }
         if (op == "bucket.update") {
-            if (!args.TryGetProperty("description", out _)) throw new VaultFault(400, "invalid_request");
-            Fields(args, "bucket", "description", "expectedRevision"); Require(p, "bucket:write"); Match(Expected(args), bucket.Revision);
-            bucket = bucket with { Description = Text(args, "description", 1024, true), Revision = Revision(), UpdatedAt = DateTimeOffset.UtcNow };
+            var hasName = args.TryGetProperty("name", out _);
+            var hasDescription = args.TryGetProperty("description", out _);
+            if (!hasName && !hasDescription) throw new VaultFault(400, "invalid_request");
+            Fields(args, "bucket", "name", "description", "expectedRevision"); Require(p, "bucket:write"); Match(Expected(args), bucket.Revision);
+            var name = hasName ? Text(args, "name", 63) : bucket.Name; ValidateName(name);
+            if (name != bucket.Name && Scalar("SELECT id FROM buckets WHERE name=$p0", name) is not null) throw new VaultFault(409, "already_exists");
+            bucket = bucket with { Name = name, Description = hasDescription ? Text(args, "description", 1024, true) : bucket.Description, Revision = Revision(), UpdatedAt = DateTimeOffset.UtcNow };
             SaveBucket(bucket); return bucket;
         }
         if (op == "bucket.delete") {
@@ -307,7 +311,7 @@ public sealed partial class VaultStore : IDisposable {
         }
         throw new CryptographicException("Unable to allocate a unique nonce.");
     }
-    private void SaveBucket(Bucket b) => Execute("UPDATE buckets SET json=$p0 WHERE id=$p1", ServerJson.Serialize(b), b.Id);
+    private void SaveBucket(Bucket b) => Execute("UPDATE buckets SET json=$p0, name=$p2 WHERE id=$p1", ServerJson.Serialize(b), b.Id, b.Name);
     private Dictionary<string, string?> Values(string bucket) => Many<StoredSecret>("SELECT json FROM entries WHERE bucket=$p0", bucket)
         .ToDictionary(s => s.Metadata.Key, s => (string?)ring.Decrypt(s.Value, s.Metadata), StringComparer.Ordinal);
     private Dictionary<string, string> Types(string bucket) => Many<StoredSecret>("SELECT json FROM entries WHERE bucket=$p0", bucket)

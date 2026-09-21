@@ -35,6 +35,28 @@ export class DarkVaultClient {
     readonly #fetch: typeof globalThis.fetch;
     readonly #timeout: number;
 
+    #defaultBucket?: string;
+    get defaultBucket(): string | undefined { return this.#defaultBucket; }
+
+    static fromUrl(connectionString: string, options: ClientOptions = {}): DarkVaultClient {
+        const match = typeof connectionString === 'string'
+            ? /^https:\/\/(dv1_[A-Za-z0-9_-]{60})@([^/?#@\s\\]+)\/([a-z0-9][a-z0-9_-]{0,62})$/.exec(connectionString) : null;
+        if (!match || match[0] !== connectionString) throw new TypeError('Invalid DarkVault connection string.');
+        let origin: URL;
+        try { origin = new URL('https://' + match[2]); }
+        catch { throw new TypeError('Invalid DarkVault connection string.'); }
+        if (origin.port === '0') throw new TypeError('Invalid DarkVault connection string.');
+        const client = new DarkVaultClient(origin.origin, match[1], options);
+        client.#defaultBucket = match[3];
+        return client;
+    }
+
+    private resolveBucket(bucket?: string): string {
+        const resolved = bucket ?? this.#defaultBucket;
+        if (resolved === undefined) throw new TypeError('Specify a bucket or use a connection string containing one.');
+        return resolved;
+    }
+
     constructor(server: string, token: string, options: ClientOptions = {}) {
         const url = new URL(server.includes('://') ? server : `https://${server}`);
         if (url.protocol !== 'https:' || url.username || url.password || url.pathname !== '/' || url.search || url.hash) {
@@ -95,11 +117,12 @@ export class DarkVaultClient {
     addBucket(name: string, description = '', signal?: AbortSignal): Promise<Bucket> { return this.execute('bucket.create', { name, description }, signal); }
     getBucket(bucket: string, signal?: AbortSignal): Promise<Bucket> { return this.execute('bucket.get', { bucket }, signal); }
     listBuckets(cursor: string | null = null, limit = 100, signal?: AbortSignal): Promise<Page<Bucket>> { return this.execute('bucket.list', { cursor, limit: pageLimit(limit) }, signal); }
-    readBucketSnapshot(bucket: string, signal?: AbortSignal): Promise<BucketSnapshot> { return this.execute('bucket.read', { bucket }, signal); }
-    async readBucket(bucket: string, signal?: AbortSignal): Promise<Record<string, string>> { return (await this.readBucketSnapshot(bucket, signal)).secrets; }
-    async readTypedBucket(bucket: string, signal?: AbortSignal): Promise<Record<string, SecretScalar>> { return typedSecrets(await this.readBucketSnapshot(bucket, signal)); }
-    async readConfiguration(bucket: string, nested = true, signal?: AbortSignal): Promise<Configuration> { return buildConfiguration(await this.readTypedBucket(bucket, signal), nested); }
+    readBucketSnapshot(bucket?: string, signal?: AbortSignal): Promise<BucketSnapshot> { return this.execute('bucket.read', { bucket: this.resolveBucket(bucket) }, signal); }
+    async readBucket(bucket?: string, signal?: AbortSignal): Promise<Record<string, string>> { return (await this.readBucketSnapshot(bucket, signal)).secrets; }
+    async readTypedBucket(bucket?: string, signal?: AbortSignal): Promise<Record<string, SecretScalar>> { return typedSecrets(await this.readBucketSnapshot(bucket, signal)); }
+    async readConfiguration(bucket?: string, nested = true, signal?: AbortSignal): Promise<Configuration> { return buildConfiguration(await this.readTypedBucket(bucket, signal), nested); }
     updateBucket(bucket: string, description: string, expectedRevision: number, signal?: AbortSignal): Promise<Bucket> { return this.execute('bucket.update', { bucket, description, expectedRevision: revision(expectedRevision) }, signal); }
+    renameBucket(bucket: string, name: string, expectedRevision: number, signal?: AbortSignal): Promise<Bucket> { return this.execute('bucket.update', { bucket, name, expectedRevision: revision(expectedRevision) }, signal); }
     async deleteBucket(bucket: string, expectedRevision: number, recursive = false, signal?: AbortSignal): Promise<void> { await this.execute('bucket.delete', { bucket, expectedRevision: revision(expectedRevision), recursive }, signal); }
     addSecret(bucket: string, key: string, value: SecretScalar, signal?: AbortSignal): Promise<SecretMetadata> { return this.execute('secret.create', { bucket, key, ...encodeScalar(value) }, signal); }
     readSecret(bucket: string, key: string, signal?: AbortSignal): Promise<Secret> { return this.execute('secret.read', { bucket, key }, signal); }
@@ -109,4 +132,9 @@ export class DarkVaultClient {
     setSecret(bucket: string, key: string, value: SecretScalar, expectedRevision = 0, signal?: AbortSignal): Promise<SecretMetadata> { return this.execute('secret.set', { bucket, key, ...encodeScalar(value), expectedRevision: revision(expectedRevision) }, signal); }
     async deleteSecret(bucket: string, key: string, expectedRevision: number, signal?: AbortSignal): Promise<void> { await this.execute('secret.delete', { bucket, key, expectedRevision: revision(expectedRevision) }, signal); }
     getTokenInfo(signal?: AbortSignal): Promise<TokenInfo> { return this.execute('token.info', {}, signal); }
+}
+
+/** Load one nested configuration snapshot; environment variables remain caller-owned. */
+export async function loadConfiguration(url: string, options: ClientOptions = {}, signal?: AbortSignal): Promise<Configuration> {
+    return DarkVaultClient.fromUrl(url, options).readConfiguration(undefined, true, signal);
 }

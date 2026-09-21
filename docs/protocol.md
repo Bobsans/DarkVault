@@ -162,7 +162,7 @@ UUID, даты и имена — строки; revision — целое 0..900719
 | `bucket.get`    | `bucket`                                     | Bucket                                       |
 | `bucket.list`   | `cursor?`, `limit?`                          | `items: Bucket[]`, `nextCursor`              |
 | `bucket.read`   | `bucket`                                     | `bucketId`, `revision`, `secrets` dictionary |
-| `bucket.update` | `bucket`, `description`, `expectedRevision`  | Bucket                                       |
+| `bucket.update` | `bucket`, `expectedRevision`, `name?`, `description?`  | Bucket                                       |
 | `bucket.delete` | `bucket`, `expectedRevision`, `recursive?`   | `deleted: true`                              |
 | `secret.create` | `bucket`, `key`, `value`                     | SecretMetadata                               |
 | `secret.read`   | `bucket`, `key`                              | SecretMetadata + `value`                     |
@@ -173,6 +173,13 @@ UUID, даты и имена — строки; revision — целое 0..900719
 | `token.info`    | empty object                                 | TokenInfo                                    |
 
 `bucket` — точное имя, разрешаемое в UUID до проверки ACL; не union имени/ID.
+`bucket.update` требует хотя бы одно поле `name` или `description` и scope
+`bucket:write`. Пропущенные поля сохраняются. Новое имя проходит ту же валидацию,
+что при создании; занятое имя возвращает `already_exists` (409). Переименование
+сохраняет UUID, секреты и доступ токенов, увеличивает revision. Старое имя перестаёт
+работать: приложения должны обновить имя бакета в конфигурации. Разрешения на
+создание будущих бакетов (`creatableBucketNames`) не изменяются.
+
 Bucket: `id`, `name`, `description`, `revision`, `createdAt`, `updatedAt`.
 SecretMetadata: `id`, `bucketId`, `key`, `revision`, `createdAt`, `updatedAt`.
 TokenInfo: `id`, `name`, `scopes`, `bucketIds`, `allBuckets`,

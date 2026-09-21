@@ -53,7 +53,7 @@ operations = {
     "bucket.get": (obj({"bucket": S}), ref("Bucket")),
     "bucket.list": (ref("PageParameters"), page(ref("Bucket"))),
     "bucket.read": (obj({"bucket": S}), ref("BucketSnapshot")),
-    "bucket.update": (obj({"bucket": S, "description": S, "expectedRevision": REV}), ref("Bucket")),
+    "bucket.update": ({**obj({"bucket": S, "name": {"type": "string", "pattern": "^[a-z0-9][a-z0-9_-]{0,62}$", "maxLength": 63}, "description": S, "expectedRevision": REV}, ["bucket", "expectedRevision"]), "anyOf": [{"required": ["name"]}, {"required": ["description"]}]}, ref("Bucket")),
     "bucket.delete": (obj({"bucket": S, "expectedRevision": REV, "recursive": BOOL}, ["bucket", "expectedRevision"]), obj({"deleted": {"const": True}})),
     "secret.create": (obj({"bucket": S, "key": S, "value": S, "type": SECRET_TYPE}, ["bucket", "key", "value"]), ref("SecretMetadata")),
     "secret.read": (obj({"bucket": S, "key": S}), ref("Secret")),

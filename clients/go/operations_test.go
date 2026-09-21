@@ -57,7 +57,7 @@ func TestLiveOperations(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	c, err := New(descriptor.URL, string(token))
+	c, err := NewFromURL(strings.Replace(descriptor.URL, "https://", "https://"+string(token)+"@", 1) + "/go-sdk-live")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -76,6 +76,9 @@ func TestLiveOperations(t *testing.T) {
 	}
 	transport := &http.Transport{TLSClientConfig: &tls.Config{RootCAs: roots, MinVersion: tls.VersionTLS12}}
 	defer transport.CloseIdleConnections()
+	previousTransport := http.DefaultTransport
+	http.DefaultTransport = transport
+	defer func() { http.DefaultTransport = previousTransport }()
 	c.HTTP.Transport = transport
 	info, err := c.GetTokenInfo(ctx)
 	if err != nil || info.ID == "" {
@@ -96,6 +99,14 @@ func TestLiveOperations(t *testing.T) {
 	bucket, err = c.UpdateBucket(ctx, "go-sdk-live", "updated", bucket.Revision)
 	if err != nil || bucket.Description != "updated" {
 		t.Fatal("update bucket", err)
+	}
+	renamed, err := c.RenameBucket(ctx, "go-sdk-live", "go-sdk-renamed", bucket.Revision)
+	if err != nil || renamed.ID != bucket.ID || renamed.Description != "updated" {
+		t.Fatal("rename bucket", err)
+	}
+	bucket, err = c.RenameBucket(ctx, "go-sdk-renamed", "go-sdk-live", renamed.Revision)
+	if err != nil {
+		t.Fatal("rename bucket back", err)
 	}
 	page, err := c.ListBuckets(ctx, "", 1)
 	if err != nil || len(page.Items) != 1 || page.NextCursor == nil {
@@ -137,7 +148,7 @@ func TestLiveOperations(t *testing.T) {
 	if err != nil || len(secrets.Items) != 1 || secrets.NextCursor != nil {
 		t.Fatal("next secret page", err)
 	}
-	values, err := c.ReadBucket(ctx, "go-sdk-live")
+	values, err := c.ReadBucket(ctx, "")
 	if err != nil || values["first"] != "set" || len(values) != 2 {
 		t.Fatal("read bucket", err)
 	}
@@ -164,6 +175,10 @@ func TestLiveOperations(t *testing.T) {
 			Enabled  bool
 			Optional *string
 		}
+	}
+	connectionURL := strings.Replace(descriptor.URL, "https://", "https://"+string(token)+"@", 1) + "/go-sdk-live"
+	if err = LoadConfiguration(ctx, connectionURL, &config); err != nil || config.Redis.Port != 6379 || config.Redis.Enabled || config.Redis.Optional != nil {
+		t.Fatal("load configuration", err)
 	}
 	if err = c.ReadConfiguration(ctx, "go-sdk-live", &config); err != nil || config.Redis.Port != 6379 || config.Redis.Enabled || config.Redis.Optional != nil {
 		t.Fatal("typed configuration", err)

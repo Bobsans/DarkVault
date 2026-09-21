@@ -134,3 +134,31 @@ decrypts secrets in memory; this is not a zero-knowledge store.
 ## Typed configuration
 
 Secret types are string, number, boolean, and null. String reads remain available; typed reads preserve scalar types. See [the configuration contract](https://github.com/Bobsans/DarkVault/blob/main/docs/configuration.md) for SDK methods, nested paths, JSON/YAML export, and string fallback rules.
+
+## Connection string
+
+```csharp
+var connection = Environment.GetEnvironmentVariable("DARKVAULT_URL")
+    ?? throw new InvalidOperationException("DARKVAULT_URL is required");
+builder.Configuration.AddFromDarkVault(connection);
+```
+
+The format is `https://<token>@host[:port]/bucket-name`. The bucket is read once,
+using the existing configuration provider behavior. The entire string is a
+secret; the provider never uses its token as part of the HTTP request URL.
+
+`AddFromDarkVault(url)` loads once and blocks until the configuration is ready,
+so use it during application startup. It returns the builder for chaining.
+For asynchronous startup, use:
+
+```csharp
+await builder.Configuration.AddFromDarkVaultAsync(connection);
+```
+
+Both methods accept an optional `CancellationToken` and caller-owned `HttpClient`
+(`httpClient: http`). Loading errors are propagated; a failed load adds no
+configuration source. Values override earlier providers; later providers can
+override DarkVault. Existing case-insensitive key collision checks and typed-null
+handling apply. There is no automatic refresh.
+
+The previous `AddFromDarkVaultBucketAsync` overloads remain available.

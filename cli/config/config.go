@@ -17,10 +17,11 @@ import (
 const MaxSize = 8192
 
 type Settings struct {
-	Server   string `json:"server,omitempty"`
-	Token    string `json:"token,omitempty"`
-	Timeout  string `json:"timeout"`
-	PageSize int    `json:"page-size"`
+	DefaultBucket string `json:"-"`
+	Server        string `json:"server,omitempty"`
+	Token         string `json:"token,omitempty"`
+	Timeout       string `json:"timeout"`
+	PageSize      int    `json:"page-size"`
 }
 
 func Defaults() Settings { return Settings{Timeout: "30s", PageSize: 100} }

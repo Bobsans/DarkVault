@@ -132,6 +132,7 @@ class DarkVaultClient:
         self._ssl = ssl_context if ssl_context is not None else ssl.create_default_context()
         if not self._ssl.check_hostname or self._ssl.verify_mode != ssl.CERT_REQUIRED:
             raise ValueError("TLS certificate and hostname verification are required")
+        self.default_bucket: str | None = None
         self._token, self._timeout = token, float(timeout)
         self._connection: http.client.HTTPSConnection | None = None
         self._key: dict[str, Any] | None = None
@@ -139,6 +140,20 @@ class DarkVaultClient:
         self._closed = False
         # ponytail: one serialized HTTPS connection; use one client per worker for parallel I/O.
         self._lock = threading.Lock()
+
+    @classmethod
+    def from_url(cls, connection_string: str, *, timeout: float = 30,
+                               ssl_context: ssl.SSLContext | None = None) -> "DarkVaultClient":
+        match = re.fullmatch(r"https://(dv1_[A-Za-z0-9_-]{60})@([^/?#@\s\\]+)/([a-z0-9][a-z0-9_-]{0,62})",
+                             connection_string) if isinstance(connection_string, str) else None
+        if match is None:
+            raise ValueError("Invalid DarkVault connection string")
+        try:
+            client = cls("https://" + match[2], match[1], timeout=timeout, ssl_context=ssl_context)
+        except ValueError:
+            raise ValueError("Invalid DarkVault connection string or client options") from None
+        client.default_bucket = match[3]
+        return client
 
     def __enter__(self) -> "DarkVaultClient":
         if self._closed:
@@ -325,20 +340,27 @@ class DarkVaultClient:
     def list_buckets(self, *, cursor: str | None = None, limit: int = 100) -> dict[str, Any]:
         return self.execute("bucket.list", {"cursor": cursor, "limit": limit})
 
-    def read_bucket_snapshot(self, bucket: str) -> dict[str, Any]:
+    def read_bucket_snapshot(self, bucket: str | None = None) -> dict[str, Any]:
+        if bucket is None:
+            bucket = self.default_bucket
+        if bucket is None:
+            raise ValueError("Specify a bucket or use a connection string containing one")
         return self.execute("bucket.read", {"bucket": bucket})
 
-    def read_bucket(self, bucket: str) -> dict[str, str]:
+    def read_bucket(self, bucket: str | None = None) -> dict[str, str]:
         return self.read_bucket_snapshot(bucket)["secrets"]
 
-    def read_typed_bucket(self, bucket: str) -> dict[str, SecretScalar]:
+    def read_typed_bucket(self, bucket: str | None = None) -> dict[str, SecretScalar]:
         return typed_secrets(self.read_bucket_snapshot(bucket))
 
-    def read_configuration(self, bucket: str, *, nested: bool = True) -> dict[str, Any]:
+    def read_configuration(self, bucket: str | None = None, *, nested: bool = True) -> dict[str, Any]:
         return build_configuration(self.read_typed_bucket(bucket), nested)
 
     def update_bucket(self, bucket: str, description: str, expected_revision: int) -> dict[str, Any]:
         return self.execute("bucket.update", {"bucket": bucket, "description": description, "expectedRevision": _revision(expected_revision)})
+
+    def rename_bucket(self, bucket: str, name: str, expected_revision: int) -> dict[str, Any]:
+        return self.execute("bucket.update", {"bucket": bucket, "name": name, "expectedRevision": _revision(expected_revision)})
 
     def delete_bucket(self, bucket: str, expected_revision: int, *, recursive: bool = False) -> None:
         self.execute("bucket.delete", {"bucket": bucket, "expectedRevision": _revision(expected_revision), "recursive": recursive})
@@ -367,3 +389,10 @@ class DarkVaultClient:
 
     def get_token_info(self) -> dict[str, Any]:
         return self.execute("token.info", {})
+
+
+def load_configuration(url: str, *, nested: bool = True, timeout: float = 30,
+                       ssl_context: ssl.SSLContext | None = None) -> dict[str, Any]:
+    """Load one configuration snapshot and close the connection, including on failure."""
+    with DarkVaultClient.from_url(url, timeout=timeout, ssl_context=ssl_context) as client:
+        return client.read_configuration(nested=nested)

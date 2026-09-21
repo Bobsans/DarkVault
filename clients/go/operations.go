@@ -3,6 +3,7 @@ package darkvault
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"time"
 )
 
@@ -73,11 +74,22 @@ func (c *Client) GetBucket(ctx context.Context, bucket string) (Bucket, error) {
 func (c *Client) ListBuckets(ctx context.Context, cursor string, limit int) (Page[Bucket], error) {
 	return execute[Page[Bucket]](ctx, c, "bucket.list", map[string]any{"cursor": cursor, "limit": limit})
 }
+
+// ReadBucketSnapshot uses DefaultBucket when bucket is empty.
 func (c *Client) ReadBucketSnapshot(ctx context.Context, bucket string) (BucketSnapshot, error) {
+	if bucket == "" {
+		bucket = c.DefaultBucket
+		if bucket == "" {
+			return BucketSnapshot{}, errors.New("specify a bucket or use a connection string containing one")
+		}
+	}
 	return execute[BucketSnapshot](ctx, c, "bucket.read", map[string]any{"bucket": bucket})
 }
 func (c *Client) UpdateBucket(ctx context.Context, bucket, description string, expectedRevision int64) (Bucket, error) {
 	return execute[Bucket](ctx, c, "bucket.update", map[string]any{"bucket": bucket, "description": description, "expectedRevision": expectedRevision})
+}
+func (c *Client) RenameBucket(ctx context.Context, bucket, name string, expectedRevision int64) (Bucket, error) {
+	return execute[Bucket](ctx, c, "bucket.update", map[string]any{"bucket": bucket, "name": name, "expectedRevision": expectedRevision})
 }
 func (c *Client) DeleteBucket(ctx context.Context, bucket string, expectedRevision int64, recursive bool) error {
 	_, err := c.Execute(ctx, "bucket.delete", map[string]any{"bucket": bucket, "expectedRevision": expectedRevision, "recursive": recursive})

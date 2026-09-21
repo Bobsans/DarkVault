@@ -234,3 +234,46 @@ Published module versions do not need that replacement.
 ## Typed configuration
 
 Secret types are string, number, boolean, and null. String reads remain available; typed reads preserve scalar types. See [the configuration contract](https://github.com/Bobsans/DarkVault/blob/main/docs/configuration.md) for SDK methods, nested paths, JSON/YAML export, and string fallback rules.
+
+## Connection string
+
+Use `https://<token>@host[:port]/bucket-name` to keep connection settings in one
+secret variable, for example `DARKVAULT_URL`. The scheme, token and bucket are
+required. Bucket names use 1–63 lowercase letters, digits, `_` or `-`, starting
+with a letter or digit. Additional paths, query strings, fragments and passwords
+are rejected. Use the literal token and bucket name without percent encoding.
+
+The SDK does not read environment variables automatically. The factory separates
+the token from the HTTPS origin before making requests. Treat the entire string
+as a secret. Existing constructors and explicit bucket arguments still work.
+The default bucket is used for bucket/configuration reads when omitted; other
+operations can use the exposed default-bucket property explicitly.
+
+```go
+vault, err := darkvault.NewFromURL(os.Getenv("DARKVAULT_URL"))
+if err != nil {
+    return err
+}
+secrets, err := vault.ReadBucket(ctx, "")
+```
+
+In Go, pass an empty bucket for `ReadBucket`, `ReadBucketSnapshot`,
+`ReadTypedBucket` and `ReadConfiguration` to use `DefaultBucket`. For other
+operations, pass `vault.DefaultBucket` explicitly.
+
+## Load configuration in one call
+
+```go
+if err := darkvault.LoadConfiguration(ctx, os.Getenv("DARKVAULT_URL"), &settings); err != nil {
+    return err
+}
+```
+
+Pass a pointer to a struct or map. The helper uses the existing typed, nested
+configuration binding and returns any connection, validation or decoding error.
+Cancellation comes from `ctx`. It uses the standard HTTP transport and system
+trust store; create a client explicitly for a custom transport.
+
+## Rename a bucket
+
+`RenameBucket(ctx, bucket, name, expectedRevision)` renames a bucket with `bucket:write` and its current revision. Its ID, secrets, description, and token access are preserved. Update the bucket name in application configuration after renaming.

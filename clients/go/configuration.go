@@ -186,6 +186,15 @@ func (c *Client) ReadTypedBucket(ctx context.Context, bucket string) (map[string
 	return snapshot.TypedSecrets()
 }
 
+// LoadConfiguration reads one configuration snapshot from a URL into a struct or map pointer.
+func LoadConfiguration(ctx context.Context, url string, target any) error {
+	client, err := NewFromURL(url)
+	if err != nil {
+		return err
+	}
+	return client.ReadConfiguration(ctx, "", target)
+}
+
 // ReadConfiguration binds a nested configuration to a caller-supplied struct or map pointer.
 func (c *Client) ReadConfiguration(ctx context.Context, bucket string, target any) error {
 	values, err := c.ReadTypedBucket(ctx, bucket)

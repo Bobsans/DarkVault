@@ -15,6 +15,8 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"regexp"
+	"strconv"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -25,8 +27,9 @@ import (
 const MaxBody = 2 * 1024 * 1024
 
 type Client struct {
-	URL, Token string
-	HTTP       *http.Client
+	URL, Token    string
+	DefaultBucket string
+	HTTP          *http.Client
 }
 type ServerKey struct {
 	ProtocolVersion int             `json:"protocolVersion"`
@@ -91,6 +94,30 @@ func New(server, token string) (*Client, error) {
 		return nil, err
 	}
 	return &Client{URL: server, Token: token, HTTP: &http.Client{Timeout: 30 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}}, nil
+}
+
+// NewFromURL accepts https://<token>@host[:port]/bucket-name.
+func NewFromURL(connectionString string) (*Client, error) {
+	match := regexp.MustCompile(`\Ahttps://(dv1_[A-Za-z0-9_-]{60})@([^/?#@\s\\]+)/([a-z0-9][a-z0-9_-]{0,62})\z`).FindStringSubmatch(connectionString)
+	if match == nil {
+		return nil, errors.New("invalid DarkVault connection string")
+	}
+	c, err := New("https://"+match[2], match[1])
+	if err != nil {
+		return nil, errors.New("invalid DarkVault connection string")
+	}
+	origin, err := url.Parse(c.URL)
+	if err != nil || origin.Hostname() == "" {
+		return nil, errors.New("invalid DarkVault connection string")
+	}
+	if port := origin.Port(); port != "" {
+		n, err := strconv.Atoi(port)
+		if err != nil || n < 1 || n > 65535 {
+			return nil, errors.New("invalid DarkVault connection string")
+		}
+	}
+	c.DefaultBucket = match[3]
+	return c, nil
 }
 func readBody(r io.Reader) ([]byte, error) {
 	b, e := io.ReadAll(io.LimitReader(r, MaxBody+1))

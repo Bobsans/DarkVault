@@ -31,10 +31,21 @@ func resolveConfiguration(cmd *cobra.Command, filename string) (config.Settings,
 		}
 		return fallback
 	}
+	var connection *client.Client
+	if raw := os.Getenv("DARKVAULT_URL"); raw != "" {
+		connection, err = client.NewFromURL(raw)
+		if err != nil {
+			return settings, errors.New("invalid DARKVAULT_URL")
+		}
+		settings.DefaultBucket = connection.DefaultBucket
+	}
 	settings.Server = value("server", "DARKVAULT_SERVER", settings.Server)
+	if connection != nil && !cmd.Flags().Changed("server") {
+		settings.Server = connection.URL
+	}
 	settings.Server, err = client.NormalizeServer(settings.Server)
 	if err != nil {
-		return settings, errors.New("set a valid HTTPS server with --server, DARKVAULT_SERVER or config set server")
+		return settings, errors.New("set a valid HTTPS server with DARKVAULT_URL, --server, DARKVAULT_SERVER or config set server")
 	}
 	if err = settings.Set("timeout", value("timeout", "DARKVAULT_TIMEOUT", settings.Timeout)); err != nil {
 		return settings, err
@@ -60,6 +71,8 @@ func resolveConfiguration(cmd *cobra.Command, filename string) (config.Settings,
 		if tokenFile == "" {
 			err = errors.New("token file path is empty")
 		}
+	case connection != nil:
+		settings.Token = connection.Token
 	case os.Getenv("DARKVAULT_TOKEN_FILE") != "":
 		tokenFile = os.Getenv("DARKVAULT_TOKEN_FILE")
 	case os.Getenv("DARKVAULT_TOKEN") != "":
@@ -99,6 +112,7 @@ func connect(cmd *cobra.Command, settings config.Settings) (*client.Client, erro
 	if err != nil {
 		return nil, err
 	}
+	c.DefaultBucket = settings.DefaultBucket
 	c.HTTP.Timeout, _ = config.ParseTimeout(settings.Timeout)
 	return c, nil
 }

@@ -5,6 +5,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -13,12 +14,12 @@ import (
 )
 
 func TestEnvironment(t *testing.T) {
-	result, e := Environment([]string{"EXISTING=keep", "DARKVAULT_TOKEN=hidden"}, map[string]string{"ConnectionStrings:Main": "value"}, true, false)
+	result, e := Environment([]string{"EXISTING=keep", "DARKVAULT_TOKEN=hidden", "DARKVAULT_URL=hidden"}, map[string]string{"ConnectionStrings:Main": "value"}, true, false)
 	if e != nil {
 		t.Fatal(e)
 	}
 	for _, v := range result {
-		if v == "DARKVAULT_TOKEN=hidden" {
+		if v == "DARKVAULT_TOKEN=hidden" || v == "DARKVAULT_URL=hidden" {
 			t.Fatal("token inherited")
 		}
 	}
@@ -91,6 +92,12 @@ func TestLiveCLI(t *testing.T) {
 	if bucket["name"] != "go_live" {
 		t.Fatal("wrong bucket")
 	}
+	bucket = run("bucket", "update", "go_live", "--description", "Keep description", "--revision", fmt.Sprint(bucket["revision"]))
+	renamed := run("bucket", "update", "go_live", "--name", "go_renamed", "--revision", fmt.Sprint(bucket["revision"]))
+	if renamed["id"] != bucket["id"] || renamed["name"] != "go_renamed" || renamed["description"] != "Keep description" {
+		t.Fatal("rename did not preserve bucket metadata")
+	}
+	run("bucket", "update", "go_renamed", "--name", "go_live", "--revision", fmt.Sprint(renamed["revision"]))
 	input, err := os.CreateTemp(t.TempDir(), "typed-input")
 	if err != nil {
 		t.Fatal(err)
@@ -109,7 +116,14 @@ func TestLiveCLI(t *testing.T) {
 	if added["type"] != "number" {
 		t.Fatal("CLI lost secret type")
 	}
-	typed := run("bucket", "read", "go_live", "--format", "typed-json")
+	t.Setenv("DARKVAULT_URL", strings.Replace(descriptor.URL, "https://", "https://"+string(token)+"@", 1)+"/go_live")
+	if runText("secret", "get", "Redis:Port") != "6379" {
+		t.Fatal("URL bucket was not used")
+	}
+	if runText("secret", "get", "go_live", "Redis:Port") != "6379" {
+		t.Fatal("explicit bucket was not used")
+	}
+	typed := run("bucket", "read", "--format", "typed-json")
 	if typed["Redis:Port"] != float64(6379) {
 		t.Fatal("typed JSON lost number")
 	}

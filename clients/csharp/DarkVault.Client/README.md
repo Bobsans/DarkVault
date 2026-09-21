@@ -86,6 +86,7 @@ in `Task<T>`; delete methods return `Task`.
 | `ReadBucketAsync(bucket)` | `IReadOnlyDictionary<string, string?>` |
 | `ReadBucketSnapshotAsync(bucket)` | `BucketSnapshot` |
 | `UpdateBucketAsync(bucket, description, expectedRevision)` | `Bucket` |
+| `RenameBucketAsync(bucket, name, expectedRevision)` | `Bucket` |
 | `DeleteBucketAsync(bucket, expectedRevision, recursive = false)` | No value |
 | `AddSecretAsync(bucket, key, value)` | `SecretMetadata` |
 | `ReadSecretAsync(bucket, key)` | `Secret` |
@@ -195,3 +196,37 @@ The caller owns and disposes `http`. Configure transport behavior before use.
 ## Typed configuration
 
 Secret types are string, number, boolean, and null. String reads remain available; typed reads preserve scalar types. See [the configuration contract](https://github.com/Bobsans/DarkVault/blob/main/docs/configuration.md) for SDK methods, nested paths, JSON/YAML export, and string fallback rules.
+
+## Connection string
+
+Use `https://<token>@host[:port]/bucket-name` to keep connection settings in one
+secret variable, for example `DARKVAULT_URL`. The scheme, token and bucket are
+required. Bucket names use 1–63 lowercase letters, digits, `_` or `-`, starting
+with a letter or digit. Additional paths, query strings, fragments and passwords
+are rejected. Use the literal token and bucket name without percent encoding.
+
+The SDK does not read environment variables automatically. The factory separates
+the token from the HTTPS origin before making requests. Treat the entire string
+as a secret. Existing constructors and explicit bucket arguments still work.
+The default bucket is used for bucket/configuration reads when omitted; other
+operations can use the exposed default-bucket property explicitly.
+
+```csharp
+var connection = Environment.GetEnvironmentVariable("DARKVAULT_URL")
+    ?? throw new InvalidOperationException("DARKVAULT_URL is required");
+using var client = DarkVaultClient.FromUrl(connection);
+var secrets = await client.ReadBucketAsync();
+var secret = await client.ReadSecretAsync(client.DefaultBucket!, "ApiKey");
+```
+
+## Load configuration in one call
+
+```csharp
+var settings = await DarkVaultClient.LoadConfigurationAsync(
+    connection, SettingsJsonContext.Default.AppSettings);
+```
+
+Supply your source-generated `JsonTypeInfo<T>`, as for `ReadConfigurationAsync`,
+to preserve Native AOT support. The helper loads one typed, nested snapshot and
+disposes its client. An optional cancellation token and caller-owned
+`HttpClient` are supported.

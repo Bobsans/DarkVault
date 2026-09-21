@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { CompactEncrypt, importJWK } from 'jose';
-import { DarkVaultClient, DarkVaultError, parseScalar, encodeScalar, buildConfiguration, formatConfiguration } from '../dist/index.js';
+import { DarkVaultClient, DarkVaultError, loadConfiguration, parseScalar, encodeScalar, buildConfiguration, formatConfiguration } from '../dist/index.js';
 import { encryptRequest, decryptResponse, parseStrict, readBounded } from '../dist/protocol.js';
 
 const token = 'dv1_' + 'A'.repeat(60);
@@ -72,6 +72,10 @@ test('All SDK operations against the .NET HTTPS server', { skip: !process.env.DA
         assert.equal((await client.getBucket(name)).id, bucket.id);
         bucket = await client.updateBucket(name, 'updated', bucket.revision);
         assert.equal(bucket.description, 'updated');
+        const renamed = await client.renameBucket(name, name + '-renamed', bucket.revision);
+        assert.equal(renamed.id, bucket.id);
+        assert.equal((await client.getBucket(name + '-renamed')).description, 'updated');
+        bucket = await client.renameBucket(name + '-renamed', name, renamed.revision);
         let page = await client.listBuckets(null, 1);
         assert.equal(page.items.length, 1); assert.ok(page.nextCursor);
         assert.equal((await client.listBuckets(page.nextCursor, 1)).items.length, 1);
@@ -84,7 +88,8 @@ test('All SDK operations against the .NET HTTPS server', { skip: !process.env.DA
         page = await client.listSecrets(name, null, 1);
         assert.equal(page.items.length, 1); assert.ok(page.nextCursor);
         assert.equal((await client.listSecrets(name, page.nextCursor, 1)).items.length, 1);
-        assert.deepEqual(await client.readBucket(name), { first: 'set', second: '' });
+        const connectionClient = DarkVaultClient.fromUrl(descriptor.url.replace('https://', 'https://' + await readFile(descriptor.tokenFile, 'utf8') + '@') + '/' + name);
+        assert.deepEqual(await connectionClient.readBucket(), { first: 'set', second: '' });
         await client.deleteSecret(name, 'first', secret.revision);
         const snapshot = await client.readBucketSnapshot(name);
         assert.equal(snapshot.bucketId, bucket.id); assert.deepEqual(snapshot.secrets, { second: '' });
@@ -92,7 +97,8 @@ test('All SDK operations against the .NET HTTPS server', { skip: !process.env.DA
         assert.equal((await client.readSecret(name, 'Redis:Port')).type, 'number');
         assert.equal((await client.readTypedSecret(name, 'Redis:Enabled')).value, false);
         assert.equal((await client.readBucket(name))['Redis:Optional'], 'null');
-        const config = await client.readConfiguration(name); assert.equal(config.Redis.Port, 6379); assert.equal(config.Redis.Optional, null);
+        assert.equal((await client.readConfiguration(name)).Redis.Port, 6379);
+        const config = await loadConfiguration(descriptor.url.replace('https://', 'https://' + await readFile(descriptor.tokenFile, 'utf8') + '@') + '/' + name); assert.equal(config.Redis.Port, 6379); assert.equal(config.Redis.Optional, null);
         const flag = await client.readSecret(name, 'Redis:Enabled'); await client.updateSecret(name, flag.key, true, flag.revision);
         assert.equal((await client.readTypedBucket(name))[flag.key], true);
         await client.deleteBucket(name, (await client.getBucket(name)).revision, true);
@@ -100,4 +106,38 @@ test('All SDK operations against the .NET HTTPS server', { skip: !process.env.DA
         try { const current = await client.getBucket(name); await client.deleteBucket(name, current.revision, true); }
         catch (error) { if (!(error instanceof DarkVaultError) || error.status !== 404) throw error; }
     }
+});
+
+test('Connection strings resolve the default bucket and isolate credentials', async () => {
+    for (const host of ['vault.example.com', 'localhost:8443', '[::1]:8443']) {
+        const client = DarkVaultClient.fromUrl('https://' + token + '@' + host + '/qa', {
+            fetch: async url => {
+                assert.equal(url, 'https://' + host + '/api/v1/crypto/key');
+                return new Response('', { status: 400 });
+            }
+        });
+        assert.equal(client.defaultBucket, 'qa');
+        await assert.rejects(client.readBucket(), DarkVaultError);
+        client.execute = async (op, parameters) => { assert.equal(op, 'bucket.read'); return { secrets: { bucket: parameters.bucket } }; };
+        assert.deepEqual(await client.readBucket(), { bucket: 'qa' });
+        assert.deepEqual(await client.readBucket('other'), { bucket: 'other' });
+    }
+    for (const raw of ["http://{token}@vault.example.com/qa", "https://vault.example.com/qa", "https://{token}:password@vault.example.com/qa", "https://{token}@vault.example.com", "https://{token}@vault.example.com/", "https://{token}@vault.example.com/qa/", "https://{token}@vault.example.com/a/../qa", "https://{token}@vault.example.com/qa?x=1", "https://{token}@vault.example.com/qa#x", "https://{token}@vault.example.com/qa\n", "https://{token}@vault.example.com:0/qa", "https://{token}@vault.example.com:65536/qa", "https://{token}@[bad/qa", "https://{token}@/qa", "https://{token}@vault.example.com/UPPER", "https://{token}@vault.example.com/%71a", "https://bad@vault.example.com/qa"]) {
+        assert.throws(() => DarkVaultClient.fromUrl(raw.replace('{token}', token)),
+            error => error instanceof TypeError && !String(error).includes(token) && !JSON.stringify(error).includes(token));
+    }
+    await assert.rejects(new DarkVaultClient('vault.example.com', token).readBucket(), TypeError);
+});
+
+test('loadConfiguration forwards transport options and cancellation', async () => {
+    const controller = new AbortController(); controller.abort();
+    const url = 'https://' + token + '@vault.example.com/qa';
+    await assert.rejects(loadConfiguration(url, { fetch: () => { throw new Error('must not fetch'); } }, controller.signal), { name: 'AbortError' });
+    let calls = 0;
+    await assert.rejects(loadConfiguration(url, { fetch: async origin => {
+        calls++;
+        assert.equal(origin, 'https://vault.example.com/api/v1/crypto/key');
+        return new Response('', { status: 403 });
+    } }), DarkVaultError);
+    assert.equal(calls, 1);
 });

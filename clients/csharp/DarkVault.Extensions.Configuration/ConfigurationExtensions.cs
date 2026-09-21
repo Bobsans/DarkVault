@@ -3,6 +3,20 @@ using DarkVault.Client;
 namespace Microsoft.Extensions.Configuration;
 
 public static class DarkVaultConfigurationExtensions {
+    // Startup-only synchronous bridge; the worker avoids capturing the caller's synchronization context.
+    public static IConfigurationBuilder AddFromDarkVault(this IConfigurationBuilder builder,
+        string url, CancellationToken cancellationToken = default, HttpClient? httpClient = null) =>
+        Task.Run(() => builder.AddFromDarkVaultAsync(url, cancellationToken, httpClient), cancellationToken).GetAwaiter().GetResult();
+
+    public static async Task<IConfigurationBuilder> AddFromDarkVaultAsync(this IConfigurationBuilder builder,
+        string url, CancellationToken cancellationToken = default, HttpClient? httpClient = null) {
+        using var client = DarkVaultClient.FromUrl(url, httpClient);
+        return await builder.AddFromDarkVaultBucketAsync(client, client.DefaultBucket!, cancellationToken);
+    }
+
+    public static Task<IConfigurationBuilder> AddFromDarkVaultBucketAsync(this IConfigurationBuilder builder,
+        string connectionString, CancellationToken cancellationToken = default) =>
+        builder.AddFromDarkVaultAsync(connectionString, cancellationToken);
     public static async Task<IConfigurationBuilder> AddFromDarkVaultBucketAsync(this IConfigurationBuilder builder,
         string server, string token, string bucket, CancellationToken cancellationToken = default) {
         using var client = new DarkVaultClient(server, token);

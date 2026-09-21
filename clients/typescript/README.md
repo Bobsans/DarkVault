@@ -232,3 +232,44 @@ the protocol helpers do not replace token authorization or CSRF/session handling
 ## Typed configuration
 
 Secret types are string, number, boolean, and null. String reads remain available; typed reads preserve scalar types. See [the configuration contract](https://github.com/Bobsans/DarkVault/blob/main/docs/configuration.md) for SDK methods, nested paths, JSON/YAML export, and string fallback rules.
+
+## Connection string
+
+Use `https://<token>@host[:port]/bucket-name` to keep connection settings in one
+secret variable, for example `DARKVAULT_URL`. The scheme, token and bucket are
+required. Bucket names use 1–63 lowercase letters, digits, `_` or `-`, starting
+with a letter or digit. Additional paths, query strings, fragments and passwords
+are rejected. Use the literal token and bucket name without percent encoding.
+
+The SDK does not read environment variables automatically. The factory separates
+the token from the HTTPS origin before making requests. Treat the entire string
+as a secret. Existing constructors and explicit bucket arguments still work.
+The default bucket is used for bucket/configuration reads when omitted; other
+operations can use the exposed default-bucket property explicitly.
+
+```typescript
+const connection = process.env.DARKVAULT_URL;
+if (!connection) throw new Error('DARKVAULT_URL is required');
+const vault = DarkVaultClient.fromUrl(connection);
+const secrets = await vault.readBucket();
+const config = await vault.readConfiguration();
+const secret = await vault.readSecret(vault.defaultBucket!, 'ApiKey');
+```
+
+The second factory argument accepts the existing `ClientOptions`.
+
+## Load configuration in one call
+
+```typescript
+import { loadConfiguration } from '@darkvault/client';
+
+const settings = await loadConfiguration(connection);
+```
+
+Returns a typed nested configuration snapshot. The optional second argument
+accepts `ClientOptions`; the third accepts an `AbortSignal`. Errors propagate to
+the caller. For flat keys or repeated requests, use the client API.
+
+## Rename a bucket
+
+`renameBucket(bucket, name, expectedRevision)` renames a bucket with `bucket:write` and its current revision. Its ID, secrets, description, and token access are preserved. Update the bucket name in application configuration after renaming.

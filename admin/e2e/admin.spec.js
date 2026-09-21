@@ -27,7 +27,7 @@ test('Admin navigation, audit filters and encrypted CRUD work on desktop and mob
   const nav = page.getByRole('navigation', { name: 'Main navigation' });
   await nav.getByRole('link', { name: 'Buckets', exact: true }).click();
   await expect(page).toHaveURL(/\/admin\/buckets$/);
-  const name = 'payments_production';
+  let name = 'payments_production';
   for (const [bucket, description] of [[name, 'Production credentials for the payments platform.'], ['payments_staging', 'Isolated secrets for integration tests and previews.'], ['payments_workers', 'Background jobs, queues, and scheduled processing.']]) {
     await page.getByRole('button', { name: 'New bucket', exact: true }).click();
     await page.locator('#bucket-form').getByLabel('Name', { exact: true }).fill(bucket);
@@ -55,7 +55,7 @@ test('Admin navigation, audit filters and encrypted CRUD work on desktop and mob
   await expect(page.locator('#value-text')).toHaveValue('browser-secret-秘密');
   await expect(page.getByLabel('Value type', { exact: true })).toBeVisible();
   await page.locator('#value-text').fill('updated');
-  await page.getByRole('button', { name: 'Save change', exact: true }).click();
+  await page.getByRole('button', { name: 'Save', exact: true }).click();
   await page.getByRole('button', { name: 'Show / edit', exact: true }).click();
   await expect(page.locator('#value-text')).toHaveValue('updated');
   // Browser history navigation also clears decrypted values and closes the dialog.
@@ -79,7 +79,7 @@ test('Admin navigation, audit filters and encrypted CRUD work on desktop and mob
   await flagRow.getByRole('button', { name: 'Show / edit', exact: true }).click();
   await expect(page.getByLabel('Value type', { exact: true })).toHaveValue('boolean');
   await page.locator('#value-text').fill('true');
-  await page.getByRole('button', { name: 'Save change', exact: true }).click();
+  await page.getByRole('button', { name: 'Save', exact: true }).click();
   await page.getByRole('link', { name: 'Configuration', exact: true }).click();
   await expect(page).toHaveURL(/\?view=configuration$/);
   await expect(page.locator('#config-output')).toContainText('<hidden:number>');
@@ -106,13 +106,42 @@ test('Admin navigation, audit filters and encrypted CRUD work on desktop and mob
   await page.reload();
   await expect(page.locator('#config-output')).toContainText('<hidden:');
 
+  await page.getByRole('link', { name: 'Secrets', exact: true }).click();
+  await page.getByText('Bucket settings', { exact: true }).click();
+  const settings = page.locator('#description-form');
+  await settings.getByLabel('Name', { exact: true }).fill('payments_staging');
+  await settings.getByRole('button', { name: 'Save', exact: true }).click();
+  await expect(page.locator('#status')).toContainText('already_exists');
+  await expect(page.locator('#bucket-title')).toHaveText(name);
+  await settings.getByLabel('Name', { exact: true }).fill('payments_renamed');
+  await settings.getByRole('button', { name: 'Save', exact: true }).click();
+  name = 'payments_renamed';
+  await expect(page).toHaveURL('/admin/buckets/' + name);
+  await expect(page.locator('#bucket-title')).toHaveText(name);
+  await expect(page.locator('#secret-list')).toContainText('ConnectionStrings:Main');
+  await page.reload();
+  await expect(settings.getByLabel('Name', { exact: true })).toHaveValue(name);
+  await page.screenshot({ path: 'test-results/admin-bucket-renamed.png' });
+
   await nav.getByRole('link', { name: 'Access tokens', exact: true }).click();
   await expect(page.locator('#config-output')).toBeEmpty();
   await expect(page).toHaveURL(/\/admin\/tokens$/);
   await page.getByRole('button', { name: 'New token', exact: true }).click();
+  await expect(page.locator('.sidebar')).not.toContainText('Server workspace');
+  await expect(page.locator('#token-archive')).toBeHidden();
+  const initialTokenCount = await page.locator('#token-count').textContent();
+  await expect(page.locator('#scopes .grant-row')).toHaveCount(9);
+  await expect(page.getByRole('checkbox', { name: 'secret:read', exact: true })).toHaveAccessibleDescription('Read secret values.');
+  await expect(page.locator('#token-buckets').getByRole('checkbox', { name, exact: true })).toHaveAccessibleDescription('Production credentials for the payments platform.');
   await page.locator('#token-form').getByLabel('Name', { exact: true }).fill('Payments service');
   await page.getByRole('button', { name: 'Select bucket reader scopes' }).click();
+  await expect(page.locator('#scopes input:checked')).toHaveCount(3);
   await page.locator('#token-buckets').getByLabel(name, { exact: true }).check();
+  await page.screenshot({ path: 'test-results/admin-token-scopes.png', fullPage: true });
+  await page.setViewportSize({ width: 390, height: 844 });
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  await page.screenshot({ path: 'test-results/admin-token-scopes-mobile.png', fullPage: true });
+  await page.setViewportSize({ width: 1440, height: 1000 });
   const expiryInput = page.locator('#token-expiry');
   let defaultExpiry = await expiryInput.inputValue();
   const lifetime = page.getByLabel('Expiration', { exact: true });
@@ -204,9 +233,16 @@ test('Admin navigation, audit filters and encrypted CRUD work on desktop and mob
   await expect(page.locator('#value-text')).toHaveValue('');
   const tokenRow = page.locator('#token-list article').filter({ hasText: 'Payments service' });
   page.once('dialog', dialog => dialog.accept()); await tokenRow.getByRole('button', { name: 'Revoke', exact: true }).click();
-  await expect(tokenRow).toContainText('Revoked');
+  await expect(tokenRow).toHaveCount(0);
+  await expect(page.locator('#token-count')).toHaveText(initialTokenCount);
+  await expect(page.locator('#revoked-token-count')).toHaveText('1');
+  await expect(page.locator('#token-buckets').getByLabel(name, { exact: true })).toBeChecked();
+  await page.locator('#token-archive summary').click();
+  const archivedRow = page.locator('#revoked-token-list article').filter({ hasText: 'Payments service' });
+  await expect(archivedRow).toContainText('Revoked:');
+  await expect(archivedRow.getByRole('button', { name: 'Revoke', exact: true })).toHaveCount(0);
   const formattedExpiry = await page.evaluate(value => new Date(value.replace(' ', 'T')).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' }), yearlyExpiry);
-  await expect(tokenRow).toContainText(formattedExpiry);
+  await expect(archivedRow).toContainText(formattedExpiry);
   await page.screenshot({ path: 'test-results/admin-tokens.png' });
 
   await nav.getByRole('link', { name: 'Activity logs', exact: true }).click();
@@ -223,14 +259,14 @@ test('Admin navigation, audit filters and encrypted CRUD work on desktop and mob
   await page.keyboard.press('ArrowDown');
   await page.keyboard.press('Enter');
   await expect(eventType).toHaveValue('http');
-  await page.getByLabel('Search logs', { exact: true }).fill(name);
+  await page.getByLabel('Search logs', { exact: true }).fill('payments_production');
   await page.getByLabel('Event type', { exact: true }).selectOption('operation');
   await page.getByRole('button', { name: 'Apply filters', exact: true }).click();
-  await expect(page).toHaveURL(/\/admin\/logs\?search=payments_production&kind=operation$/);
+  await expect(page).toHaveURL('/admin/logs?search=payments_production&kind=operation');
   await expect(page.locator('#audit-list')).toContainText('secret.update');
   await expect(page.locator('#audit-list')).not.toContainText('browser-secret-秘密');
   await page.reload();
-  await expect(page.getByLabel('Search logs', { exact: true })).toHaveValue(name);
+  await expect(page.getByLabel('Search logs', { exact: true })).toHaveValue('payments_production');
   await expect(page.getByLabel('Event type', { exact: true })).toHaveValue('operation');
   await expect(page.locator('#audit-list')).toContainText('secret.update');
   await page.locator('#audit-list button').first().click();

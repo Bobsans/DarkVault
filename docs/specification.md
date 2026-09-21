@@ -120,7 +120,7 @@ pattern = ^dv1_[A-Za-z0-9_-]{60}$
 | `GetBucket` — метаданные                  | `bucket:read`                                 |
 | `ReadBucket` — все значения               | `bucket:read` + `secret:read` + `secret:list` |
 | `AddBucket`                               | `bucket:create`                               |
-| `UpdateBucket` — описание                 | `bucket:write`                                |
+| `UpdateBucket` — имя и описание                 | `bucket:write`                                |
 | `DeleteBucket` — пустой                   | `bucket:delete`                               |
 | `DeleteBucket(recursive: true)`           | `bucket:delete` + `secret:delete`             |
 | `ListSecrets`                             | `secret:list`                                 |
@@ -129,7 +129,7 @@ pattern = ^dv1_[A-Za-z0-9_-]{60}$
 | `DeleteSecret`                            | `secret:delete`                               |
 | `GetTokenInfo` — собственные права и срок | Любой действующий токен                       |
 
-Добавляется только `bucket:write` для описания. `secret:write` намеренно объединяет
+`bucket:write` разрешает изменение имени и описания бакета. `secret:write` намеренно объединяет
 создание и обновление; отдельные права на них пока не требуются.
 Scopes независимы: запись не подразумевает чтение, список не раскрывает значения.
 `bucket:read` сам по себе не раскрывает секреты. Неизвестные scopes отклоняются.

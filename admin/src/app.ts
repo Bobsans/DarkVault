@@ -40,7 +40,17 @@ let routeVersion = 0;
 let auditCursor: string | null = null;
 let auditCount = 0;
 let auditBusy = false;
-const scopes = ['secret:read', 'secret:write', 'secret:delete', 'secret:list', 'bucket:create', 'bucket:read', 'bucket:list', 'bucket:delete', 'bucket:write'];
+const scopes = [
+    ['secret:read', 'Read secret values.'],
+    ['secret:write', 'Create secrets and update their values.'],
+    ['secret:delete', 'Permanently delete secrets.'],
+    ['secret:list', 'List secret names and metadata without revealing values.'],
+    ['bucket:create', 'Create buckets with the allowed new names below, or any name with all-bucket access.'],
+    ['bucket:read', 'Read bucket metadata. Reading all values also requires secret:read and secret:list.'],
+    ['bucket:list', 'List accessible buckets.'],
+    ['bucket:delete', 'Delete empty buckets. Deleting their secrets also requires secret:delete.'],
+    ['bucket:write', 'Rename buckets and update their descriptions.']
+];
 const status = (text: string) => { $('status').textContent = text; $('status').hidden = !text; };
 const message = (error: unknown) => status(error instanceof Error ? error.message : 'Request failed');
 const date = (value?: string | null) => value ? new Date(value).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' }) : '—';
@@ -51,7 +61,7 @@ function clearConfiguration() { configurationSnapshot = null; $('config-output')
 function lockWorkspace() {
     authenticated = false; routeVersion++; clearValue(); tokenExpiry.close(); clearConfiguration(); bucketMetadata = [];
     $('secret-form').reset(); $('password-form').reset();
-    for (const id of ['bucket-list', 'secret-list', 'token-list', 'audit-list']) $(id).replaceChildren();
+    for (const id of ['bucket-list', 'secret-list', 'token-list', 'revoked-token-list', 'audit-list']) $(id).replaceChildren();
     $('workspace').hidden = true; $('login').hidden = false; $('loading').hidden = true;
 }
 async function api<T = unknown>(operation: string, parameters: object = {}): Promise<T> {
@@ -81,9 +91,12 @@ function icon(name: string) {
     const use = document.createElementNS(svg.namespaceURI, 'use'); use.setAttribute('href', '#icon-' + name); svg.append(use);
     return svg;
 }
-function field(parent: HTMLElement, name: string, value: string, title: string) {
-    const label = node('label', '', 'check'); const input = document.createElement('input'); input.type = 'checkbox'; input.name = name; input.value = value;
-    label.append(input, document.createTextNode(title)); parent.append(label);
+function field(parent: HTMLElement, name: string, value: string, title: string, description: string) {
+    const label = node('label', '', 'check grant-row'); const input = document.createElement('input'); input.type = 'checkbox'; input.name = name; input.value = value;
+    const text = node('span', '', 'grant-text'); const heading = node('strong', title); const detail = node('small', description);
+    heading.id = name + '-' + value; detail.id = heading.id + '-help';
+    input.setAttribute('aria-labelledby', heading.id); input.setAttribute('aria-describedby', detail.id);
+    text.append(heading, detail); label.append(input, text); parent.append(label);
 }
 async function plain(path: string, body: object) {
     const response = await fetch(path, { method: 'POST', redirect: 'error', headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrf }, body: JSON.stringify(body), signal: AbortSignal.timeout(30000) });
@@ -187,6 +200,7 @@ async function loadBucket(name: string, version = routeVersion) {
     const bucket = await api<Bucket>('bucket.get', { bucket: name });
     const items = await all<SecretMetadata>('secret.list', { bucket: name }); if (!active(version)) return;
     current = bucket; bucketMetadata = items; $('bucket-title').textContent = bucket.name; $('bucket-description').textContent = bucket.description || 'Application secrets, securely stored.';
+    control($('description-form'), 'name').value = bucket.name;
     control($('description-form'), 'description').value = bucket.description; $('secret-count').textContent = items.length + ' secrets';
     const list = $('secret-list'); list.replaceChildren();
     for (const secret of items) {
@@ -222,13 +236,17 @@ function renderConfiguration() {
 }
 async function loadTokens(version = routeVersion) {
     const [available, tokens] = await Promise.all([all<Bucket>('bucket.list'), all<TokenRecord>('token.list')]); if (!active(version)) return;
-    buckets = available; $('token-count').textContent = String(tokens.length);
+    buckets = available; $('token-count').textContent = String(tokens.filter(t => !t.revokedAt).length);
+    const revokedCount = tokens.filter(t => t.revokedAt).length;
+    $('revoked-token-count').textContent = String(revokedCount); $('token-archive').hidden = revokedCount === 0;
     // Keep selected grants when refreshing the issued-token list.
     const selected = new Set(new FormData($('token-form')).getAll('bucketIds'));
     $('token-buckets').replaceChildren(node('legend', 'Allowed buckets'));
-    for (const b of buckets) field($('token-buckets'), 'bucketIds', b.id, b.name);
+    for (const b of buckets) field($('token-buckets'), 'bucketIds', b.id, b.name, b.description || 'No description provided.');
+    if (!buckets.length) $('token-buckets').append(node('p', 'No buckets yet. Create a bucket or allow new bucket names below.', 'caption'));
     for (const input of $('token-buckets').querySelectorAll('input')) input.checked = selected.has(input.value);
     const list = $('token-list'); list.replaceChildren();
+    const archive = $('revoked-token-list'); archive.replaceChildren();
     for (const t of tokens) {
         const i = t.info; const state = t.revokedAt ? 'Revoked' : i.expiresAt && Date.parse(i.expiresAt) <= Date.now() ? 'Expired' : 'Active';
         const row = node('article', '', 'row'); const body = node('div', '', 'row-body'); const heading = node('div', '', 'token-heading');
@@ -238,9 +256,10 @@ async function loadTokens(version = routeVersion) {
             node('small', 'Expires: ' + (i.expiresAt ? date(i.expiresAt) : 'Never') + ' · Last used: ' + (t.lastUsedAt ? date(t.lastUsedAt) : 'Never')));
         row.append(body);
         if (!t.revokedAt) row.append(button('Revoke', async () => { if (!confirm('Revoke ' + i.name + '?')) return; await api('token.revoke', { id: i.id }); if (active(version)) await loadTokens(version); }, 'danger'));
-        list.append(row);
+        if (t.revokedAt) body.append(node('small', 'Revoked: ' + date(t.revokedAt)));
+        (t.revokedAt ? archive : list).append(row);
     }
-    if (!tokens.length) list.append(node('p', 'No access tokens yet. Create a token to connect an application.', 'empty'));
+    if (!list.childElementCount) list.append(node('p', 'No current access tokens. Create a token to connect an application.', 'empty'));
 }
 function auditRow(entry: AuditEntry, index: number) {
     const row = node('tr'); const event = node('td'); const actor = node('td'); const source = node('td'); const result = node('td'); const toggle = node('td');
@@ -278,7 +297,11 @@ document.addEventListener('click', e => {
 });
 window.addEventListener('popstate', () => { renderRoute().catch(message); });
 if (['/', '/index.html', '/admin', '/admin/'].includes(location.pathname)) history.replaceState(null, '', '/admin/buckets');
-for (const scope of scopes) field($('scopes'), 'scopes', scope, scope);
+for (const [prefix, title] of [['secret:', 'Secrets'], ['bucket:', 'Buckets']]) {
+    const group = node('fieldset', '', 'grant-list'); group.append(node('legend', title));
+    for (const [scope, description] of scopes.filter(([scope]) => scope.startsWith(prefix))) field(group, 'scopes', scope, scope, description);
+    $('scopes').append(group);
+}
 action($('login-form'), 'submit', async () => { const f = $('login-form'); try {
     const challenge = await plain('/admin/login', { username: control(f, 'username').value, password: control(f, 'password').value, recoveryCode: control(f, 'recovery').value || null });
     const codes = await finishMfa(challenge); await session(); showRecovery(codes);
@@ -288,7 +311,11 @@ action($('new-bucket'), 'click', () => { $('bucket-create').open = true; control
 action($('new-token'), 'click', () => { $('token-create').open = true; control($('token-form'), 'name').focus(); });
 action($('bucket-form'), 'submit', async () => { const f = $('bucket-form'); const version = routeVersion; await api('bucket.create', { name: control(f, 'name').value, description: control(f, 'description').value }); f.reset(); $('bucket-create').open = false; if (active(version)) await loadBuckets(version); });
 $('bucket-search').addEventListener('input', renderBuckets);
-action($('description-form'), 'submit', async () => { const version = routeVersion; await api('bucket.update', { bucket: current.name, description: control($('description-form'), 'description').value, expectedRevision: current.revision }); if (active(version)) await renderRoute(); });
+action($('description-form'), 'submit', async () => {
+    const version = routeVersion; const form = $('description-form');
+    const bucket = await api<Bucket>('bucket.update', { bucket: current.name, name: control(form, 'name').value, description: control(form, 'description').value, expectedRevision: current.revision });
+    if (active(version)) await navigate('/admin/buckets/' + encodeURIComponent(bucket.name), true);
+});
 action($('secret-form'), 'submit', async () => { const f = $('secret-form'); const version = routeVersion; const type = control(f, 'type').value as SecretType; const value = type === 'null' ? 'null' : control(f, 'value').value; await api('secret.create', { bucket: current.name, key: control(f, 'key').value, ...encodeScalar(parseScalar(value, type)) }); f.reset(); if (active(version)) await renderRoute(); });
 action($('delete-bucket'), 'click', async () => {
     const version = routeVersion; const bucket = current; const items = await all<SecretMetadata>('secret.list', { bucket: bucket.name });

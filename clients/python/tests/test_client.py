@@ -12,7 +12,7 @@ from uuid import uuid4
 from jwcrypto import jwk
 from jwcrypto.common import JWException
 
-from darkvault import DarkVaultClient, DarkVaultError
+from darkvault import DarkVaultClient, DarkVaultError, load_configuration
 from darkvault import _protocol as wire
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -81,6 +81,38 @@ class ClientTests(unittest.TestCase):
         response = self.transform(response)
         encrypted = wire.encrypt(response, wire.public_key(request["replyKey"]), request["requestId"], "darkvault-response+jwe")
         return self.status, {"content-type": "application/jose"}, encrypted
+
+    def test_connection_strings(self):
+        for host in ("vault.example.com", "localhost:8443", "[::1]:8443"):
+            with DarkVaultClient.from_url(f"https://{TOKEN}@{host}/qa") as client:
+                self.assertEqual(client.default_bucket, "qa")
+                self.assertNotIn(TOKEN, client._host)
+                with patch.object(client, "_http", side_effect=self.respond):
+                    self.assertEqual(client.read_bucket(), self.data["secrets"])
+                    client.read_bucket("other")
+                self.assertEqual(self.requests[-2]["parameters"], {"bucket": "qa"})
+                self.assertEqual(self.requests[-1]["parameters"], {"bucket": "other"})
+        for raw in ['http://{token}@vault.example.com/qa', 'https://vault.example.com/qa', 'https://{token}:password@vault.example.com/qa', 'https://{token}@vault.example.com', 'https://{token}@vault.example.com/', 'https://{token}@vault.example.com/qa/', 'https://{token}@vault.example.com/a/../qa', 'https://{token}@vault.example.com/qa?x=1', 'https://{token}@vault.example.com/qa#x', 'https://{token}@vault.example.com/qa\n', 'https://{token}@vault.example.com:0/qa', 'https://{token}@vault.example.com:65536/qa', 'https://{token}@[bad/qa', 'https://{token}@/qa', 'https://{token}@vault.example.com/UPPER', 'https://{token}@vault.example.com/%71a', 'https://bad@vault.example.com/qa']:
+            with self.assertRaises(ValueError) as error:
+                DarkVaultClient.from_url(raw.replace("{token}", TOKEN))
+            self.assertNotIn(TOKEN, str(error.exception))
+        with self.assertRaises(ValueError):
+            self.client.read_bucket()
+
+    def test_load_configuration_closes_client_on_success_and_failure(self):
+        url = f"https://{TOKEN}@vault.example.com/qa"
+        for fail in (False, True):
+            client = DarkVaultClient.from_url(url)
+            self.addCleanup(client.close)
+            with patch.object(DarkVaultClient, "from_url", return_value=client), patch.object(client, "_http", side_effect=self.respond):
+                if fail:
+                    self.error = {"code": "forbidden"}
+                    self.status = 403
+                    with self.assertRaises(DarkVaultError):
+                        load_configuration(url)
+                else:
+                    self.assertEqual(load_configuration(url), self.data["secrets"])
+            self.assertTrue(client._closed)
 
     def test_bucket_reads_and_key_cache(self):
         with patch.object(self.client, "_http", side_effect=self.respond) as transport:
@@ -220,11 +252,15 @@ class LiveTests(unittest.TestCase):
         context = ssl.create_default_context(cafile=descriptor["ca"])
         token = Path(descriptor["tokenFile"]).read_text(encoding="utf-8").strip()
         name = "python_" + uuid4().hex
-        with DarkVaultClient(descriptor["url"], token, ssl_context=context) as vault:
+        with DarkVaultClient.from_url(descriptor["url"].replace("https://", "https://" + token + "@") + "/" + name, ssl_context=context) as vault:
             bucket = vault.add_bucket(name, "Python acceptance")
             self.assertEqual(vault.get_bucket(name)["id"], bucket["id"])
             bucket = vault.update_bucket(name, "Updated", bucket["revision"])
             self.assertEqual(bucket["description"], "Updated")
+            renamed = vault.rename_bucket(name, name + "-renamed", bucket["revision"])
+            self.assertEqual(renamed["id"], bucket["id"])
+            self.assertEqual(vault.get_bucket(name + "-renamed")["description"], "Updated")
+            bucket = vault.rename_bucket(name + "-renamed", name, renamed["revision"])
             item = vault.add_secret(name, "ConnectionStrings:Main", "秘密\nvalue")
             self.assertEqual(vault.read_secret(name, item["key"])["value"], "秘密\nvalue")
             item = vault.update_secret(name, item["key"], "new", item["revision"])
@@ -233,7 +269,7 @@ class LiveTests(unittest.TestCase):
             self.assertEqual((conflict.exception.code, conflict.exception.status), ("revision_conflict", 409))
             item = vault.set_secret(name, item["key"], "", item["revision"])
             second = vault.set_secret(name, "Other", "second")
-            self.assertEqual(vault.read_bucket(name), {"ConnectionStrings:Main": "", "Other": "second"})
+            self.assertEqual(vault.read_bucket(), {"ConnectionStrings:Main": "", "Other": "second"})
             first = vault.list_secrets(name, limit=1)
             self.assertIsNotNone(first["nextCursor"])
             last = vault.list_secrets(name, cursor=first["nextCursor"], limit=1)
@@ -253,7 +289,8 @@ class LiveTests(unittest.TestCase):
             self.assertEqual(vault.read_secret(name, "Redis:Port")["type"], "number")
             self.assertIs(vault.read_typed_secret(name, flag["key"])["value"], False)
             self.assertEqual(vault.read_bucket(name)["Redis:Optional"], "null")
-            config = vault.read_configuration(name)
+            self.assertEqual(vault.read_configuration(name)["Redis"]["Port"], 6379)
+            config = load_configuration(descriptor["url"].replace("https://", "https://" + token + "@") + "/" + name, ssl_context=context)
             self.assertEqual(config["Redis"]["Port"], 6379)
             self.assertIsNone(config["Redis"]["Optional"])
             vault.update_secret(name, flag["key"], True, flag["revision"])

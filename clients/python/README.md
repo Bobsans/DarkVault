@@ -221,3 +221,44 @@ normal dependency management.
 ## Typed configuration
 
 Secret types are string, number, boolean, and null. String reads remain available; typed reads preserve scalar types. See [the configuration contract](https://github.com/Bobsans/DarkVault/blob/main/docs/configuration.md) for SDK methods, nested paths, JSON/YAML export, and string fallback rules.
+
+## Connection string
+
+Use `https://<token>@host[:port]/bucket-name` to keep connection settings in one
+secret variable, for example `DARKVAULT_URL`. The scheme, token and bucket are
+required. Bucket names use 1–63 lowercase letters, digits, `_` or `-`, starting
+with a letter or digit. Additional paths, query strings, fragments and passwords
+are rejected. Use the literal token and bucket name without percent encoding.
+
+The SDK does not read environment variables automatically. The factory separates
+the token from the HTTPS origin before making requests. Treat the entire string
+as a secret. Existing constructors and explicit bucket arguments still work.
+The default bucket is used for bucket/configuration reads when omitted; other
+operations can use the exposed default-bucket property explicitly.
+
+```python
+with DarkVaultClient.from_url(os.environ["DARKVAULT_URL"]) as vault:
+    secrets = vault.read_bucket()
+    config = vault.read_configuration()
+    secret = vault.read_secret(vault.default_bucket, "ApiKey")
+```
+
+The factory also accepts `timeout` and `ssl_context`, with the same TLS checks as
+the regular constructor.
+
+## Load configuration in one call
+
+```python
+from darkvault import load_configuration
+
+settings = load_configuration(os.environ["DARKVAULT_URL"])
+```
+
+Returns a typed nested dictionary and always closes the connection, including
+on failure. Pass `nested=False` for flat keys; `timeout` and `ssl_context` have
+the same meaning as in the client constructor. This is a synchronous, one-time
+load; reuse a client when making repeated calls.
+
+## Rename a bucket
+
+`rename_bucket(bucket, name, expected_revision)` renames a bucket with `bucket:write` and its current revision. Its ID, secrets, description, and token access are preserved. Update the bucket name in application configuration after renaming.

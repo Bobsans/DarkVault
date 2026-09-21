@@ -60,7 +60,7 @@ func Command() *cobra.Command {
 			kind, verb := kind, verb
 			var revision int64
 			var recursive, stdin bool
-			var description, cursor, format, secretType string
+			var description, cursor, format, secretType, newName string
 			var limit int
 			use := verb
 			count := 0
@@ -76,11 +76,20 @@ func Command() *cobra.Command {
 					count = 2
 				}
 			}
-			cmd := &cobra.Command{Use: use, Args: cobra.ExactArgs(count)}
+			defaultable := count > 0 && !(kind == "bucket" && verb == "add")
+			validateArgs := cobra.ExactArgs(count)
+			if defaultable {
+				use = strings.Replace(use, "<bucket>", "[bucket]", 1)
+				validateArgs = cobra.RangeArgs(count-1, count)
+			}
+			cmd := &cobra.Command{Use: use, Args: validateArgs}
 			cmd.Flags().Int64Var(&revision, "revision", 0, "Expected revision (0 means absent)")
 			cmd.Flags().BoolVar(&recursive, "recursive", false, "Delete a non-empty bucket")
 			cmd.Flags().BoolVar(&stdin, "stdin", false, "Read value from stdin")
 			cmd.Flags().StringVar(&description, "description", "", "Bucket description")
+			if kind == "bucket" && verb == "update" {
+				cmd.Flags().StringVar(&newName, "name", "", "New bucket name")
+			}
 			cmd.Flags().StringVar(&cursor, "cursor", "", "Opaque listing cursor")
 			cmd.Flags().IntVar(&limit, "limit", 100, "Page size (overrides config page-size)")
 			cmd.Flags().StringVar(&format, "format", "json", "Output format (json)")
@@ -101,6 +110,12 @@ func Command() *cobra.Command {
 				settings, e := resolveConfiguration(cmd, filename)
 				if e != nil {
 					return e
+				}
+				if defaultable && len(args) == count-1 {
+					if settings.DefaultBucket == "" {
+						return errors.New("specify a bucket or set DARKVAULT_URL")
+					}
+					args = append([]string{settings.DefaultBucket}, args...)
 				}
 				c, e := connect(cmd, settings)
 				if e != nil {
@@ -134,7 +149,12 @@ func Command() *cobra.Command {
 					}
 				}
 				if kind == "bucket" && (verb == "add" || verb == "update") {
-					p["description"] = description
+					if !cmd.Flags().Changed("name") || cmd.Flags().Changed("description") {
+						p["description"] = description
+					}
+					if cmd.Flags().Changed("name") {
+						p["name"] = newName
+					}
 				}
 				if verb == "update" || verb == "set" || verb == "delete" {
 					if verb != "set" && !cmd.Flags().Changed("revision") {
@@ -216,14 +236,11 @@ func Command() *cobra.Command {
 	}
 	var bucket string
 	var aspnet, overwrite bool
-	run := &cobra.Command{Use: "exec --bucket <name> -- <program> [args...]", Args: cobra.MinimumNArgs(1)}
+	run := &cobra.Command{Use: "exec [--bucket <name>] -- <program> [args...]", Args: cobra.MinimumNArgs(1)}
 	run.Flags().StringVar(&bucket, "bucket", "", "Bucket name")
 	run.Flags().BoolVar(&aspnet, "aspnet-keys", false, "Map : to __ in environment names")
 	run.Flags().BoolVar(&overwrite, "overwrite-env", false, "Allow replacing inherited variables")
 	run.RunE = func(cmd *cobra.Command, args []string) error {
-		if bucket == "" {
-			return errors.New("--bucket is required")
-		}
 		filename, e := path()
 		if e != nil {
 			return e
@@ -231,6 +248,12 @@ func Command() *cobra.Command {
 		settings, e := resolveConfiguration(cmd, filename)
 		if e != nil {
 			return e
+		}
+		if !cmd.Flags().Changed("bucket") {
+			bucket = settings.DefaultBucket
+		}
+		if bucket == "" {
+			return errors.New("provide --bucket or set DARKVAULT_URL")
 		}
 		c, e := connect(cmd, settings)
 		if e != nil {
@@ -264,7 +287,7 @@ func Environment(inherited []string, values map[string]string, aspnet, overwrite
 	}
 	for _, s := range inherited {
 		k, _, ok := strings.Cut(s, "=")
-		if ok && !strings.EqualFold(k, "DARKVAULT_TOKEN") && !strings.EqualFold(k, "DARKVAULT_TOKEN_FILE") {
+		if ok && !strings.EqualFold(k, "DARKVAULT_TOKEN") && !strings.EqualFold(k, "DARKVAULT_TOKEN_FILE") && !strings.EqualFold(k, "DARKVAULT_URL") {
 			env[normalize(k)] = s
 		}
 	}

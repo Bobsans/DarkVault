@@ -24,6 +24,27 @@ public sealed class DarkVaultClient : IDisposable {
         ownsHttp = httpClient is null;
         http = httpClient ?? new HttpClient(new HttpClientHandler { AllowAutoRedirect = false });
     }
+    public string? DefaultBucket { get; private init; }
+
+    public static DarkVaultClient FromUrl(string connectionString, HttpClient? httpClient = null) {
+        var match = System.Text.RegularExpressions.Regex.Match(connectionString ?? "",
+            @"\Ahttps://(dv1_[A-Za-z0-9_-]{60})@([^/?#@\s\\]+)/([a-z0-9][a-z0-9_-]{0,62})\z");
+        if (!match.Success || !Uri.TryCreate("https://" + match.Groups[2].Value, UriKind.Absolute, out var origin) ||
+            origin.Host.Length == 0 || origin.Port < 1 || origin.Port > 65535)
+            throw new ArgumentException("Invalid DarkVault connection string.", nameof(connectionString));
+        return new DarkVaultClient(origin.AbsoluteUri, match.Groups[1].Value, httpClient) { DefaultBucket = match.Groups[3].Value };
+    }
+
+    public static async Task<T> LoadConfigurationAsync<T>(string url,
+        System.Text.Json.Serialization.Metadata.JsonTypeInfo<T> typeInfo,
+        CancellationToken cancellationToken = default, HttpClient? httpClient = null) {
+        using var client = FromUrl(url, httpClient);
+        return await client.ReadConfigurationAsync(typeInfo, cancellationToken);
+    }
+
+    private string ResolveBucket(string? bucket) => bucket ?? DefaultBucket ??
+        throw new InvalidOperationException("Specify a bucket or use a connection string containing one.");
+
     public void Dispose() { if (ownsHttp) http.Dispose(); }
 
     public Task<Bucket> AddBucketAsync(string name, string description = "", CancellationToken cancellationToken = default) =>
@@ -31,16 +52,20 @@ public sealed class DarkVaultClient : IDisposable {
     public Task<Bucket> GetBucketAsync(string bucket, CancellationToken cancellationToken = default) => ExecuteAsync<Bucket>("bucket.get", new { bucket }, cancellationToken);
     public Task<Page<Bucket>> ListBucketsAsync(string? cursor = null, int limit = 100, CancellationToken cancellationToken = default) =>
         ExecuteAsync<Page<Bucket>>("bucket.list", new { cursor, limit }, cancellationToken);
-    public Task<BucketSnapshot> ReadBucketSnapshotAsync(string bucket, CancellationToken cancellationToken = default) =>
-        ExecuteAsync<BucketSnapshot>("bucket.read", new { bucket }, cancellationToken);
-    public async Task<IReadOnlyDictionary<string, string?>> ReadBucketAsync(string bucket, CancellationToken cancellationToken = default) =>
+    public Task<BucketSnapshot> ReadBucketSnapshotAsync(string? bucket = null, CancellationToken cancellationToken = default) =>
+        ExecuteAsync<BucketSnapshot>("bucket.read", new { bucket = ResolveBucket(bucket) }, cancellationToken);
+    public async Task<IReadOnlyDictionary<string, string?>> ReadBucketAsync(string? bucket = null, CancellationToken cancellationToken = default) =>
         (await ReadBucketSnapshotAsync(bucket, cancellationToken)).Secrets;
-    public async Task<IReadOnlyDictionary<string, JsonElement>> ReadTypedBucketAsync(string bucket, CancellationToken cancellationToken = default) =>
+    public async Task<IReadOnlyDictionary<string, JsonElement>> ReadTypedBucketAsync(string? bucket = null, CancellationToken cancellationToken = default) =>
         SecretValues.Typed(await ReadBucketSnapshotAsync(bucket, cancellationToken));
     public async Task<T> ReadConfigurationAsync<T>(string bucket, System.Text.Json.Serialization.Metadata.JsonTypeInfo<T> typeInfo, CancellationToken cancellationToken = default) =>
         SecretValues.Configuration(await ReadTypedBucketAsync(bucket, cancellationToken)).Deserialize(typeInfo) ?? throw new FormatException("Invalid configuration.");
+    public Task<T> ReadConfigurationAsync<T>(System.Text.Json.Serialization.Metadata.JsonTypeInfo<T> typeInfo, CancellationToken cancellationToken = default) =>
+        ReadConfigurationAsync(ResolveBucket(null), typeInfo, cancellationToken);
     public Task<Bucket> UpdateBucketAsync(string bucket, string description, long expectedRevision, CancellationToken cancellationToken = default) =>
         ExecuteAsync<Bucket>("bucket.update", new { bucket, description, expectedRevision }, cancellationToken);
+    public Task<Bucket> RenameBucketAsync(string bucket, string name, long expectedRevision, CancellationToken cancellationToken = default) =>
+        ExecuteAsync<Bucket>("bucket.update", new { bucket, name, expectedRevision }, cancellationToken);
     public async Task DeleteBucketAsync(string bucket, long expectedRevision, bool recursive = false, CancellationToken cancellationToken = default) =>
         _ = await ExecuteAsync<JsonElement>("bucket.delete", new { bucket, expectedRevision, recursive }, cancellationToken);
     public Task<SecretMetadata> AddSecretAsync(string bucket, string key, string value, CancellationToken cancellationToken = default) =>

@@ -15,7 +15,7 @@ import (
 
 func cleanEnvironment(t *testing.T) {
 	t.Helper()
-	for _, key := range []string{"DARKVAULT_CONFIG", "DARKVAULT_SERVER", "DARKVAULT_TOKEN", "DARKVAULT_TOKEN_FILE", "DARKVAULT_TIMEOUT", "DARKVAULT_PAGE_SIZE"} {
+	for _, key := range []string{"DARKVAULT_URL", "DARKVAULT_CONFIG", "DARKVAULT_SERVER", "DARKVAULT_TOKEN", "DARKVAULT_TOKEN_FILE", "DARKVAULT_TIMEOUT", "DARKVAULT_PAGE_SIZE"} {
 		t.Setenv(key, "")
 	}
 }
@@ -156,5 +156,53 @@ func TestRuntimePrecedence(t *testing.T) {
 	after, err := config.Load(path)
 	if err != nil || after != saved {
 		t.Fatal("runtime overrides modified saved config")
+	}
+}
+
+func TestConnectionURLPrecedence(t *testing.T) {
+	cleanEnvironment(t)
+	token := "dv1_" + strings.Repeat("A", 60)
+	other := "dv1_" + strings.Repeat("B", 60)
+	t.Setenv("DARKVAULT_URL", "https://"+token+"@url.example.com/qa")
+	t.Setenv("DARKVAULT_SERVER", "https://env.example.com")
+	t.Setenv("DARKVAULT_TOKEN", other)
+	t.Setenv("DARKVAULT_TOKEN_FILE", "unused-token-file")
+	path := filepath.Join(t.TempDir(), "config.json")
+	resolve := func(args ...string) config.Settings {
+		t.Helper()
+		root := Command()
+		var got config.Settings
+		root.AddCommand(&cobra.Command{Use: "probe", RunE: func(cmd *cobra.Command, _ []string) error {
+			var err error
+			got, err = resolveConfiguration(cmd, path)
+			return err
+		}})
+		root.SetArgs(append([]string{"probe"}, args...))
+		if err := root.Execute(); err != nil {
+			t.Fatal(err)
+		}
+		return got
+	}
+	got := resolve()
+	if got.Server != "https://url.example.com" || got.Token != token || got.DefaultBucket != "qa" {
+		t.Fatal("URL did not override split environment")
+	}
+	got = resolve("--server", "https://flag.example.com", "--token", other)
+	if got.Server != "https://flag.example.com" || got.Token != other || got.DefaultBucket != "qa" {
+		t.Fatal("flags did not override URL")
+	}
+	tokenPath := filepath.Join(t.TempDir(), "token")
+	if err := os.WriteFile(tokenPath, []byte(other), 0600); err != nil {
+		t.Fatal(err)
+	}
+	got = resolve("--token-file", tokenPath)
+	if got.Token != other {
+		t.Fatal("token file flag did not override URL")
+	}
+	t.Setenv("DARKVAULT_URL", "https://"+token+"@url.example.com/qa?bad")
+	cmd := Command()
+	cmd.SetArgs([]string{"--config", path, "bucket", "read"})
+	if err := cmd.Execute(); err == nil || strings.Contains(err.Error(), token) {
+		t.Fatal("invalid URL accepted or exposed")
 	}
 }
