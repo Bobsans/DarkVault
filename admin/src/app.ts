@@ -40,6 +40,7 @@ let routeVersion = 0;
 let auditCursor: string | null = null;
 let auditCount = 0;
 let auditBusy = false;
+let tokenLoadSequence = 0;
 const scopes = [
     ['secret:read', 'Read secret values.'],
     ['secret:write', 'Create secrets and update their values.'],
@@ -240,7 +241,8 @@ function renderConfiguration() {
     } catch (error) { $('config-error').textContent = error instanceof Error ? error.message : 'Cannot build configuration.'; $('config-error').hidden = false; }
 }
 async function loadTokens(version = routeVersion) {
-    const [available, tokens] = await Promise.all([all<Bucket>('bucket.list'), all<TokenRecord>('token.list')]); if (!active(version)) return;
+    const sequence = ++tokenLoadSequence;
+    const [available, tokens] = await Promise.all([all<Bucket>('bucket.list'), all<TokenRecord>('token.list')]); if (!active(version) || sequence !== tokenLoadSequence) return;
     buckets = available; $('token-count').textContent = String(tokens.filter(t => !t.revokedAt).length);
     const revokedCount = tokens.filter(t => t.revokedAt).length;
     $('revoked-token-count').textContent = String(revokedCount); $('token-archive').hidden = revokedCount === 0;
@@ -260,7 +262,18 @@ async function loadTokens(version = routeVersion) {
         body.append(heading, tags, node('p', 'Buckets: ' + (i.allBuckets ? 'All buckets' : i.bucketIds.map(id => buckets.find(b => b.id === id)?.name || id).join(', ') || 'None')),
             node('small', 'Expires: ' + (i.expiresAt ? date(i.expiresAt) : 'Never') + ' · Last used: ' + (t.lastUsedAt ? date(t.lastUsedAt) : 'Never')));
         row.append(body);
-        if (!t.revokedAt) row.append(button('Revoke', async () => { if (!confirm('Revoke ' + i.name + '?')) return; await api('token.revoke', { id: i.id }); if (active(version)) await loadTokens(version); }, 'danger'));
+        if (!t.revokedAt) row.append(button('Revoke', async () => {
+            if (!confirm('Revoke ' + i.name + '?')) return;
+            const result = await api<{ revoked: boolean }>('token.revoke', { id: i.id });
+            if (!active(version) || !result.revoked) return;
+            const count = Number.parseInt($('token-count').textContent || '0', 10);
+            $('token-count').textContent = String(Math.max(0, count - 1));
+            $('revoked-token-count').textContent = String(Number.parseInt($('revoked-token-count').textContent || '0', 10) + 1);
+            $('token-archive').hidden = false;
+            const badge = heading.querySelector('span'); if (badge) { badge.textContent = 'Revoked'; badge.className = 'badge neutral'; }
+            body.append(node('small', 'Revoked: ' + date(new Date().toISOString())));
+            archive.append(row);
+        }, 'danger'));
         if (t.revokedAt) body.append(node('small', 'Revoked: ' + date(t.revokedAt)));
         (t.revokedAt ? archive : list).append(row);
     }
