@@ -162,8 +162,8 @@ Chocolatey и Homebrew в этот workflow не входит.
 [`bobsans/darkvault`](https://hub.docker.com/r/bobsans/darkvault) после успешной
 сборки и проверки GitHub Release.
 
-Workflow использует Docker Hub access token, сохранённый как secret
-`DOCKERHUB_TOKEN`, и переменную environment `DOCKERHUB_USERNAME`.
+Workflow использует secrets `DOCKERHUB_TOKEN` (Docker Hub access token)
+и `DOCKERHUB_USERNAME` (имя пользователя Docker Hub).
 Постоянный пароль в workflow не используется.
 
 Публикуются только Linux-образы `amd64` и `arm64` с тегами:
