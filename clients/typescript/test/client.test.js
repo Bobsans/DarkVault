@@ -43,6 +43,8 @@ test('Strict JSON, bounded responses and response binding', async () => {
         .setProtectedHeader({ alg: 'ECDH-ES', enc: 'A256GCM', typ: 'darkvault-response+jwe', cty: 'application/json', kid: request.payload.requestId }).encrypt(reply);
     const body = await encrypt(payload);
     assert.deepEqual(await decryptResponse(body, request, 200), { id: 'token' });
+    const missingError = { ...payload }; delete missingError.error;
+    await assert.rejects(decryptResponse(await encrypt(missingError), request, 200));
     await assert.rejects(decryptResponse(body, request, 201));
     await assert.rejects(decryptResponse(await encrypt({ ...payload, audience: 'admin' }), request, 200));
     const parts = body.split('.'); parts[4] = 'AAAAAAAAAAAAAAAAAAAAAA';
@@ -70,7 +72,9 @@ test('Caches server keys and preserves plaintext error metadata', async () => {
         serverId: '00000000-0000-4000-8000-000000000001',
         kid: '00000000-0000-4000-8000-000000000002',
         publicKey: await exportJWK(pair.publicKey),
-        notAfter: new Date(Date.now() + 300000).toISOString()
+        serverTime: new Date().toISOString(),
+        notAfter: new Date(Date.now() + 300000).toISOString(),
+        limits: { maxBodyBytes: 2 * 1024 * 1024, maxPlaintextBytes: 1536 * 1024 }
     };
     let discovery = 0; let posts = 0;
     const client = new DarkVaultClient('vault.example.com', token, { fetch: async url => {

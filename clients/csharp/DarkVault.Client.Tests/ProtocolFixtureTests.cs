@@ -7,6 +7,13 @@ namespace DarkVault.Client.Tests;
 
 public sealed class ProtocolFixtureTests {
     [Test]
+    public void ErrorCodesAreBounded() {
+        var raw = new string('x', 65) + "\\r\\nsecret";
+        var error = new DarkVaultException(raw, 500);
+        Assert.That(error.Code, Is.EqualTo("server_error"));
+        Assert.That(error.Message, Does.Not.Contain("secret"));
+    }
+    [Test]
     public void RequiredProtocolFieldsCannotBeMissingOrNull() {
         Assert.Throws<JsonException>(() => Wire.Parse<PublicKey>("{\"kty\":\"EC\",\"crv\":\"P-256\"}"));
         Assert.Throws<JsonException>(() => Wire.Parse<PublicKey>("{\"kty\":null,\"crv\":\"P-256\",\"x\":\"a\",\"y\":\"b\"}"));

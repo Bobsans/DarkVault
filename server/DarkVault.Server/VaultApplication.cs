@@ -6,6 +6,7 @@ using System.Threading.RateLimiting;
 using DarkVault.Client;
 using Microsoft.AspNetCore.Antiforgery;
 using Microsoft.AspNetCore.HttpOverrides;
+using Microsoft.AspNetCore.Http.Features;
 using Microsoft.AspNetCore.DataProtection;
 
 namespace DarkVault.Server;
@@ -95,6 +96,8 @@ public static class VaultApplication {
                 using var loginLease = (c.Request.Path.StartsWithSegments("/admin/mfa") ? limits.Mfa : limits.Logins).AttemptAcquire(SecurityLimits.AddressKey(c.Connection.RemoteIpAddress));
                 if (!loginLease.IsAcquired) { await RateLimited(c, loginLease); return; }
             }
+            var adminBody = c.Request.Path == "/admin/login" || c.Request.Path == "/admin/password" || c.Request.Path.StartsWithSegments("/admin/mfa");
+            if (adminBody && c.Features.Get<IHttpMaxRequestBodySizeFeature>() is { IsReadOnly: false } bodySize) bodySize.MaxRequestBodySize = 64 * 1024;
             using var timeout = CancellationTokenSource.CreateLinkedTokenSource(c.RequestAborted); timeout.CancelAfter(TimeSpan.FromSeconds(30)); c.RequestAborted = timeout.Token;
             try {
                 if (c.Request.Path == "/api/v1/execute") {
@@ -218,14 +221,14 @@ public static class VaultApplication {
     public sealed record PasswordRequest(string CurrentPassword, string NewPassword);
 }
 public sealed class AdminSessions {
-    private const string Cookie = "__Host-DarkVault";
+    private const string Cookie = "__Secure-DarkVault";
     private readonly ConcurrentDictionary<string, Session> sessions = new();
     public void Create(HttpContext c, VaultStore.Admin admin) {
         Remove(c);
         foreach (var (key, session) in sessions) if (session.Created < DateTimeOffset.UtcNow.AddHours(-12) || session.Last < DateTimeOffset.UtcNow.AddMinutes(-30)) sessions.TryRemove(key, out _);
         if (sessions.Count >= 100) throw new VaultFault(429, "rate_limited");
         var token = Wire.NewToken(); var now = DateTimeOffset.UtcNow; sessions[Wire.HashToken(token)] = new(admin.Stamp, now, now);
-        c.Response.Cookies.Append(Cookie, token, new CookieOptions { HttpOnly = true, Secure = true, SameSite = SameSiteMode.Strict, Path = "/", MaxAge = TimeSpan.FromHours(12) });
+        c.Response.Cookies.Append(Cookie, token, new CookieOptions { HttpOnly = true, Secure = true, SameSite = SameSiteMode.Strict, Path = "/admin", MaxAge = TimeSpan.FromHours(12) });
     }
     public VaultStore.Admin? Get(HttpContext c, VaultStore store) {
         var value = c.Request.Cookies[Cookie]; if (value is null || !Wire.IsToken(value)) return null;
@@ -242,7 +245,7 @@ public sealed class AdminSessions {
     }
     public void Remove(HttpContext c) {
         if (c.Request.Cookies[Cookie] is string token && Wire.IsToken(token)) sessions.TryRemove(Wire.HashToken(token), out _);
-        c.Response.Cookies.Delete(Cookie, new CookieOptions { Secure = true, HttpOnly = true, SameSite = SameSiteMode.Strict, Path = "/" });
+        c.Response.Cookies.Delete(Cookie, new CookieOptions { Secure = true, HttpOnly = true, SameSite = SameSiteMode.Strict, Path = "/admin" });
     }
     private sealed record Session(string Stamp, DateTimeOffset Created, DateTimeOffset Last);
 }

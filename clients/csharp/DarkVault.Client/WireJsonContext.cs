@@ -6,6 +6,7 @@ namespace DarkVault.Client;
 [JsonSourceGenerationOptions(PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase, GenerationMode = JsonSourceGenerationMode.Metadata)]
 [JsonSerializable(typeof(PublicKey))]
 [JsonSerializable(typeof(CryptoKey))]
+[JsonSerializable(typeof(TransportLimits))]
 [JsonSerializable(typeof(VaultRequest))]
 [JsonSerializable(typeof(VaultResponse))]
 [JsonSerializable(typeof(Bucket))]

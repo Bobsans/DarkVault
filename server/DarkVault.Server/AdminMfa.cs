@@ -5,7 +5,7 @@ using Microsoft.AspNetCore.Identity;
 namespace DarkVault.Server;
 
 public sealed class AdminMfa(TimeProvider clock) {
-    private const string Cookie = "__Host-DarkVault-Mfa";
+    private const string Cookie = "__Secure-DarkVault-Mfa";
     private readonly object gate = new();
     private readonly Dictionary<string, Challenge> pending = new();
     private sealed record Challenge(VaultStore.Admin Admin, string State, string Origin, bool Enroll, bool Replace, bool First, DateTimeOffset Expires);
@@ -52,7 +52,7 @@ public sealed class AdminMfa(TimeProvider clock) {
             if (pending.Count >= 100) throw new VaultFault(429, "rate_limited");
             var token = Wire.NewToken();
             pending.Add(Wire.HashToken(token), new(admin, state, PublicOrigin(context), enroll, replace, store.Mfa.Passkeys.Length == 0, now.AddMinutes(2)));
-            context.Response.Cookies.Append(Cookie, token, new() { Secure = true, HttpOnly = true, SameSite = SameSiteMode.Strict, Path = "/", MaxAge = TimeSpan.FromMinutes(2) });
+            context.Response.Cookies.Append(Cookie, token, new() { Secure = true, HttpOnly = true, SameSite = SameSiteMode.Strict, Path = "/admin", MaxAge = TimeSpan.FromMinutes(2) });
         }
         return new(false, enroll ? "register" : "verify", System.Text.Json.JsonSerializer.Deserialize(json, Wire.TypeInfo<System.Text.Json.JsonElement>()));
     }
@@ -63,7 +63,7 @@ public sealed class AdminMfa(TimeProvider clock) {
             if (context.Request.Cookies[Cookie] is not { } token || !pending.Remove(Wire.HashToken(token), out var found) || found.Expires <= clock.GetUtcNow()) throw new VaultFault(401, "unauthorized");
             challenge = found;
         }
-        context.Response.Cookies.Delete(Cookie, new() { Secure = true, HttpOnly = true, SameSite = SameSiteMode.Strict, Path = "/" });
+        context.Response.Cookies.Delete(Cookie, new() { Secure = true, HttpOnly = true, SameSite = SameSiteMode.Strict, Path = "/admin" });
         if (challenge.Origin != PublicOrigin(context) || context.Request.Headers.Origin != challenge.Origin) throw new VaultFault(401, "unauthorized");
         var credential = input.Credential.GetRawText();
         if (credential.Length > 32768) throw new VaultFault(400, "invalid_request");

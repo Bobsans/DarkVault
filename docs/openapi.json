@@ -857,7 +857,7 @@
       "AdminSession": {
         "type": "apiKey",
         "in": "cookie",
-        "name": "__Host-DarkVault"
+        "name": "__Secure-DarkVault"
       },
       "Csrf": {
         "type": "apiKey",

@@ -19,10 +19,10 @@ export function parseScalar(value: string, type: SecretType = 'string'): SecretS
     }
     throw new TypeError('Invalid secret type or scalar value.');
 }
-export function typedSecrets(snapshot: { secrets: Record<string, string>; types?: Record<string, SecretType> | null }): Record<string, SecretScalar> {
+export function typedSecrets(snapshot: { secrets: Record<string, string>; types: Record<string, SecretType> }): Record<string, SecretScalar> {
     const result: Record<string, SecretScalar> = Object.create(null);
-    if (snapshot.types != null && (typeof snapshot.types !== 'object' || Array.isArray(snapshot.types))) throw new TypeError('Invalid secret type map.');
-    if (snapshot.types && Object.keys(snapshot.types).some(key => !Object.hasOwn(snapshot.secrets, key))) throw new TypeError('Invalid secret type map.');
+    if (typeof snapshot.types !== 'object' || snapshot.types === null || Array.isArray(snapshot.types)) throw new TypeError('Invalid secret type map.');
+    if (Object.keys(snapshot.types).some(key => !Object.hasOwn(snapshot.secrets, key))) throw new TypeError('Invalid secret type map.');
     for (const [key, value] of Object.entries(snapshot.secrets)) result[key] = parseScalar(value, snapshot.types && Object.hasOwn(snapshot.types, key) ? snapshot.types[key] : 'string');
     return result;
 }

@@ -39,10 +39,10 @@ def parse_scalar(value: str, secret_type: str = "string") -> SecretScalar:
 
 
 def typed_secrets(snapshot: dict[str, Any]) -> dict[str, SecretScalar]:
-    types = snapshot.get("types", {})
-    if types is None:
-        types = {}
-    if not isinstance(types, dict) or any(key not in snapshot["secrets"] for key in types):
+    if "types" not in snapshot or not isinstance(snapshot["types"], dict):
+        raise ValueError("Invalid secret type map")
+    types = snapshot["types"]
+    if any(key not in snapshot["secrets"] for key in types):
         raise ValueError("Invalid secret type map")
     return {key: parse_scalar(value, types.get(key, "string")) for key, value in snapshot["secrets"].items()}
 

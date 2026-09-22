@@ -67,7 +67,11 @@ export async function decryptResponse(body: string, request: Awaited<ReturnType<
   if (!response || typeof response !== 'object' || Array.isArray(response)) throw new Error('Invalid response');
   for (const k of ['v', 'requestId', 'serverId', 'audience', 'operation'] as const) if (response[k] !== request.payload[k]) throw new Error('Mismatched response');
   if (response.status !== status) throw new Error('Mismatched status');
-  if (response.error) throw new DarkVaultError(response.error.code, status, request.payload.requestId);
+  if (!Object.prototype.hasOwnProperty.call(response, 'error')) throw new Error('Invalid response');
+  if (response.error !== null) {
+    if (!response.error || typeof response.error !== 'object' || typeof response.error.code !== 'string' || typeof response.error.message !== 'string') throw new Error('Invalid response error');
+    throw new DarkVaultError(response.error.code, status, request.payload.requestId);
+  }
   if (status < 200 || status >= 300 || !response.data || typeof response.data !== 'object' || Array.isArray(response.data)) throw new Error('Invalid response');
   return response.data;
 }

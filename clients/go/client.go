@@ -26,6 +26,7 @@ import (
 )
 
 const MaxBody = 2 * 1024 * 1024
+const MaxPlaintext = 1536 * 1024
 
 type Client struct {
 	URL            string
@@ -50,11 +51,24 @@ func (c *Client) String() string {
 func (c *Client) GoString() string { return c.String() }
 
 type ServerKey struct {
-	ProtocolVersion int             `json:"protocolVersion"`
-	ServerID        string          `json:"serverId"`
-	Kid             string          `json:"kid"`
-	PublicKey       jose.JSONWebKey `json:"publicKey"`
-	NotAfter        time.Time       `json:"notAfter"`
+	ProtocolVersion int `json:"protocolVersion"`
+
+	ServerID string `json:"serverId"`
+
+	ServerTime time.Time `json:"serverTime"`
+
+	Kid string `json:"kid"`
+
+	PublicKey jose.JSONWebKey `json:"publicKey"`
+
+	NotAfter time.Time `json:"notAfter"`
+
+	Limits TransportLimits `json:"limits"`
+}
+type TransportLimits struct {
+	MaxBodyBytes int `json:"maxBodyBytes"`
+
+	MaxPlaintextBytes int `json:"maxPlaintextBytes"`
 }
 type Request struct {
 	V          int             `json:"v"`
@@ -76,6 +90,37 @@ type Response struct {
 	Data      json.RawMessage `json:"data"`
 	Error     *APIError       `json:"error"`
 }
+
+func (r *Response) UnmarshalJSON(data []byte) error {
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(data, &fields); err != nil {
+		return err
+	}
+	if _, ok := fields["error"]; !ok {
+		return errors.New("missing response error")
+	}
+	type responseAlias Response
+	var decoded responseAlias
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		return err
+	}
+	if !bytes.Equal(bytes.TrimSpace(fields["error"]), []byte("null")) {
+		var errorFields map[string]json.RawMessage
+		if err := json.Unmarshal(fields["error"], &errorFields); err != nil || errorFields == nil {
+			return errors.New("invalid response error")
+		}
+		var code, message string
+		if err := json.Unmarshal(errorFields["code"], &code); err != nil || json.Unmarshal(errorFields["message"], &message) != nil || code == "" {
+			return errors.New("invalid response error")
+		}
+		if decoded.Error == nil {
+			return errors.New("invalid response error")
+		}
+	}
+	*r = Response(decoded)
+	return nil
+}
+
 type APIError struct {
 	Code       string        `json:"code"`
 	Status     int           `json:"-"`
@@ -83,7 +128,15 @@ type APIError struct {
 	RetryAfter time.Duration `json:"-"`
 }
 
-func (e *APIError) Error() string { return "DarkVault request failed (" + e.Code + ")" }
+var errorCodePattern = regexp.MustCompile(`^[a-z_]{1,64}$`)
+
+func safeErrorCode(code string) string {
+	if errorCodePattern.MatchString(code) {
+		return code
+	}
+	return "server_error"
+}
+func (e *APIError) Error() string { return "DarkVault request failed (" + safeErrorCode(e.Code) + ")" }
 func NormalizeServer(server string) (string, error) {
 	if !strings.Contains(server, "://") {
 		server = "https://" + server
@@ -154,6 +207,22 @@ func newID() (string, error) {
 	b[8] = (b[8] & 63) | 128
 	s := hex.EncodeToString(b)
 	return s[:8] + "-" + s[8:12] + "-" + s[12:16] + "-" + s[16:20] + "-" + s[20:], nil
+}
+
+var uuidPattern = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
+
+func validateServerKey(key ServerKey) error {
+	if key.ProtocolVersion != 1 || !uuidPattern.MatchString(key.ServerID) || !uuidPattern.MatchString(key.Kid) || key.ServerTime.IsZero() || !key.NotAfter.After(time.Now()) {
+		return errors.New("invalid server key")
+	}
+	if key.Limits.MaxBodyBytes < 1 || key.Limits.MaxBodyBytes > MaxBody || key.Limits.MaxPlaintextBytes < 1 || key.Limits.MaxPlaintextBytes > MaxPlaintext {
+		return errors.New("invalid server limits")
+	}
+	pub, ok := key.PublicKey.Key.(*ecdsa.PublicKey)
+	if !ok || pub.Curve != elliptic.P256() || !key.PublicKey.IsPublic() {
+		return errors.New("invalid public key")
+	}
+	return nil
 }
 func ValidateJSON(b []byte) error {
 	if len(b) > 1536*1024 || !utf8.Valid(b) {
@@ -345,8 +414,8 @@ func (c *Client) discoverServerKey(ctx context.Context, transport *http.Client) 
 	if err = json.Unmarshal(body, &key); err != nil {
 		return ServerKey{}, err
 	}
-	if key.ProtocolVersion != 1 || !key.NotAfter.After(time.Now()) {
-		return ServerKey{}, errors.New("invalid server key")
+	if err = validateServerKey(key); err != nil {
+		return ServerKey{}, err
 	}
 	expires := time.Now().Add(5 * time.Minute)
 	if key.NotAfter.Before(expires) {
@@ -386,7 +455,7 @@ func plainAPIError(body []byte, status int, requestID string, headers http.Heade
 		} `json:"error"`
 	}
 	if ValidateJSON(body) == nil && json.Unmarshal(body, &envelope) == nil && envelope.Error.Code != "" {
-		code = envelope.Error.Code
+		code = safeErrorCode(envelope.Error.Code)
 	}
 	return &APIError{Code: code, Status: status, RequestID: requestID, RetryAfter: parseRetryAfter(headers.Get("Retry-After"))}
 }
@@ -468,6 +537,8 @@ func (c *Client) Execute(ctx context.Context, op string, parameters any) (json.R
 			return nil, errors.New("mismatched response")
 		}
 		if response.Error != nil {
+
+			response.Error.Code = safeErrorCode(response.Error.Code)
 			response.Error.Status = r.StatusCode
 			response.Error.RequestID = id
 			return nil, response.Error

@@ -85,6 +85,7 @@ public static class ServerCommands {
     }
     public static void SecureDirectory(string path) {
         path = Path.GetFullPath(path);
+        RejectReparsePoints(path);
         if (path == Path.GetPathRoot(path) || (Directory.Exists(path) && Directory.EnumerateFileSystemEntries(path).Any() && !File.Exists(Path.Combine(path, "keyring.json"))))
             throw new InvalidOperationException("Use an empty directory or an existing DarkVault installation.");
         Directory.CreateDirectory(path);
@@ -94,6 +95,13 @@ public static class ServerCommands {
                 InheritanceFlags.ContainerInherit | InheritanceFlags.ObjectInherit, PropagationFlags.None, AccessControlType.Allow));
             new DirectoryInfo(path).SetAccessControl(security);
         } else File.SetUnixFileMode(path, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+    }
+    private static void RejectReparsePoints(string path) {
+        var full = Path.GetFullPath(path); var root = Path.GetPathRoot(full)!; var current = root;
+        foreach (var part in full[root.Length..].Split(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar, StringSplitOptions.RemoveEmptyEntries)) {
+            current = Path.Combine(current, part);
+            if ((File.Exists(current) || Directory.Exists(current)) && (File.GetAttributes(current) & FileAttributes.ReparsePoint) != 0) throw new InvalidOperationException("Vault data paths cannot be reparse points.");
+        }
     }
     public static void SecureFile(string path) {
         path = Path.GetFullPath(path);

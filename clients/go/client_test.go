@@ -22,6 +22,10 @@ type roundTripFunc func(*http.Request) (*http.Response, error)
 
 func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
 
+func testServerKey(key *ecdsa.PrivateKey) ServerKey {
+	return ServerKey{ProtocolVersion: 1, ServerID: "00000000-0000-4000-8000-000000000001", ServerTime: time.Now().UTC(), Kid: "00000000-0000-4000-8000-000000000002", PublicKey: jose.JSONWebKey{Key: &key.PublicKey}, NotAfter: time.Now().Add(time.Hour), Limits: TransportLimits{MaxBodyBytes: MaxBody, MaxPlaintextBytes: MaxPlaintext}}
+}
+
 func TestClientFormattingDoesNotExposeToken(t *testing.T) {
 	token := "dv1_" + strings.Repeat("A", 60)
 	c, err := New("https://vault.example.com", token)
@@ -37,12 +41,18 @@ func TestClientFormattingDoesNotExposeToken(t *testing.T) {
 		t.Fatal("explicit token accessor changed")
 	}
 }
+func TestErrorCodesAreBounded(t *testing.T) {
+	raw := strings.Repeat("x", 65) + "\\r\\nsecret"
+	if safeErrorCode(raw) != "server_error" || strings.Contains((&APIError{Code: raw}).Error(), "secret") {
+		t.Fatal("untrusted error code was not bounded")
+	}
+}
 func TestServerKeyCacheAndPlainErrorMetadata(t *testing.T) {
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
 		t.Fatal(err)
 	}
-	body, err := json.Marshal(ServerKey{ProtocolVersion: 1, ServerID: "test", Kid: "test", PublicKey: jose.JSONWebKey{Key: &key.PublicKey}, NotAfter: time.Now().Add(time.Hour)})
+	body, err := json.Marshal(testServerKey(key))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -76,7 +86,7 @@ func TestUnknownKeyRefreshesCachedServerKeyOnce(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	body, err := json.Marshal(ServerKey{ProtocolVersion: 1, ServerID: "test", Kid: "test", PublicKey: jose.JSONWebKey{Key: &key.PublicKey}, NotAfter: time.Now().Add(time.Hour)})
+	body, err := json.Marshal(testServerKey(key))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -110,7 +120,7 @@ func TestConfiguredTimeoutCoversDiscoveryAndExecute(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	body, err := json.Marshal(ServerKey{ProtocolVersion: 1, ServerID: "test", Kid: "test", PublicKey: jose.JSONWebKey{Key: &key.PublicKey}, NotAfter: time.Now().Add(time.Hour)})
+	body, err := json.Marshal(testServerKey(key))
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -57,8 +57,9 @@ class ClientTests(unittest.TestCase):
         self.key = jwk.JWK.generate(kty="EC", crv="P-256")
         self.discovery = {"protocolVersion": 1, "serverId": str(uuid4()), "serverTime": self.now(),
                           "kid": str(uuid4()), "publicKey": self.key.export_public(as_dict=True),
-                          "notAfter": self.now(timedelta(hours=1))}
-        self.data = {"bucketId": str(uuid4()), "revision": 2, "secrets": {"Unicode": "秘密\nvalue", "Empty": ""}}
+                          "notAfter": self.now(timedelta(hours=1)),
+                          "limits": {"maxBodyBytes": wire.MAX_BODY, "maxPlaintextBytes": wire.MAX_PLAINTEXT}}
+        self.data = {"bucketId": str(uuid4()), "revision": 2, "secrets": {"Unicode": "秘密\nvalue", "Empty": ""}, "types": {}}
         self.requests = []
         self.status = 200
         self.error = None

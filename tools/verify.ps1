@@ -40,7 +40,7 @@ try {
     $pythonExecutable = Join-Path $pythonEnvironment $(if ($IsWindows) { 'Scripts/python.exe' } else { 'bin/python' })
     $newPythonEnvironment = !(Test-Path -LiteralPath $pythonExecutable)
     if ($newPythonEnvironment) { & $Python -m venv $pythonEnvironment }
-    if (!$SkipInstall -or $newPythonEnvironment) { & $pythonExecutable -m pip install -e ./clients/python build }
+    if (!$SkipInstall -or $newPythonEnvironment) { & $pythonExecutable -m pip install -c ./clients/python/constraints.txt -e ./clients/python build }
     Push-Location clients/typescript
     try {
         if (!$SkipInstall) { & $Pnpm install --frozen-lockfile }
@@ -61,7 +61,9 @@ try {
         dotnet format whitespace $project --no-restore --verify-no-changes
     }
     dotnet build tests/AcceptanceHost/AcceptanceHost.csproj -c Release --disable-build-servers -m:1 -warnaserror
-    if ((Get-FileHash tests/fixtures/jwe.json).Hash -ne (Get-FileHash clients/go/testdata/jwe.json).Hash) { throw 'Go SDK fixture differs from the shared protocol fixture.' }
+    $fixturePath = Join-Path $root 'tests/fixtures/jwe.json'
+    $fixtureHash = (Get-FileHash -LiteralPath $fixturePath).Hash
+    if ($fixtureHash -ne (Get-FileHash clients/go/testdata/jwe.json).Hash) { throw 'Go SDK fixture differs from the shared protocol fixture.' }
     Push-Location clients/go
     try {
         if (@(gofmt -l .).Count) { throw 'Run gofmt on the Go SDK before verification.' }
@@ -140,7 +142,7 @@ try {
     if (!(Test-Path -LiteralPath $consumerExecutable)) { & $Python -m venv $pythonConsumer }
     $wheel = Get-ChildItem artifacts/python -File -Filter 'darkvault_client-*.whl' | Sort-Object LastWriteTimeUtc -Descending | Select-Object -First 1
     if (!$wheel) { throw 'Python wheel was not produced.' }
-    & $consumerExecutable -m pip install --force-reinstall $wheel.FullName
+    & $consumerExecutable -m pip install -c (Join-Path $root "clients/python/constraints.txt") --force-reinstall $wheel.FullName
     & $consumerExecutable -I -m unittest discover -s clients/python/tests -v
     Push-Location admin
     try { & $Node node_modules/@playwright/test/cli.js test } finally { Pop-Location }
@@ -156,6 +158,7 @@ try {
     dotnet pack clients/csharp/DarkVault.Client/DarkVault.Client.csproj -c Release --no-restore -o artifacts/packages
     dotnet pack clients/csharp/DarkVault.Extensions.Configuration/DarkVault.Extensions.Configuration.csproj -c Release --no-restore -o artifacts/packages
     & $Pnpm --dir clients/typescript pack --pack-destination (Join-Path $artifacts 'typescript')
+    if ((Get-FileHash -LiteralPath $fixturePath).Hash -ne $fixtureHash) { throw 'AcceptanceHost changed the shared protocol fixture.' }
     Write-Output 'Verification completed, including SDK packages. Only temporary test state was used.'
 } finally {
     if ($hostProcess -and !$hostProcess.HasExited) { Stop-Process -Id $hostProcess.Id }

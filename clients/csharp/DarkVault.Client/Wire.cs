@@ -131,20 +131,24 @@ public static class Wire {
 }
 
 public sealed record PublicKey(string Kty, string Crv, string X, string Y);
-public sealed record CryptoKey(int ProtocolVersion, string ServerId, DateTimeOffset ServerTime, string Kid, PublicKey PublicKey, DateTimeOffset NotAfter, object? Limits = null);
+public sealed record CryptoKey(int ProtocolVersion, string ServerId, DateTimeOffset ServerTime, string Kid, PublicKey PublicKey, DateTimeOffset NotAfter, TransportLimits Limits);
+public sealed record TransportLimits(int MaxBodyBytes, int MaxPlaintextBytes);
 public sealed record VaultRequest(int V, string RequestId, DateTimeOffset IssuedAt, string ServerId, string Audience, string Operation, JsonElement Parameters, PublicKey ReplyKey);
 public sealed record VaultError(string Code, string Message);
 public sealed record VaultResponse(int V, string RequestId, string ServerId, string Audience, string Operation, int Status, JsonElement? Data, VaultError? Error);
 public sealed record Bucket(string Id, string Name, string Description, long Revision, DateTimeOffset CreatedAt, DateTimeOffset UpdatedAt);
-public sealed record SecretMetadata(string Id, string BucketId, string Key, long Revision, DateTimeOffset CreatedAt, DateTimeOffset UpdatedAt, string Type = "string");
-public sealed record Secret(string Id, string BucketId, string Key, long Revision, DateTimeOffset CreatedAt, DateTimeOffset UpdatedAt, string Value, string Type = "string") {
+public sealed record SecretMetadata(string Id, string BucketId, string Key, long Revision, DateTimeOffset CreatedAt, DateTimeOffset UpdatedAt, string Type);
+public sealed record Secret(string Id, string BucketId, string Key, long Revision, DateTimeOffset CreatedAt, DateTimeOffset UpdatedAt, string Value, string Type) {
     public JsonElement GetTypedValue() => SecretValues.Parse(Value, Type);
 }
-public sealed record BucketSnapshot(string BucketId, long Revision, Dictionary<string, string?> Secrets, Dictionary<string, string>? Types = null);
+public sealed record BucketSnapshot(string BucketId, long Revision, Dictionary<string, string?> Secrets, Dictionary<string, string> Types);
 public sealed record Page<T>(IReadOnlyList<T> Items, string? NextCursor);
 public sealed record TokenInfo(string Id, string Name, string[] Scopes, string[] BucketIds, bool AllBuckets, string[] CreatableBucketNames, DateTimeOffset? ExpiresAt);
-public sealed class DarkVaultException(string code, int status, string? requestId = null) : Exception($"DarkVault request failed ({code}).") {
-    public string Code { get; } = code;
+internal static class ErrorCode {
+    public static string Safe(string? value) => value is { Length: > 0 and <= 64 } && value.All(ch => ch is >= 'a' and <= 'z' or '_') ? value : "server_error";
+}
+public sealed class DarkVaultException(string code, int status, string? requestId = null) : Exception($"DarkVault request failed ({ErrorCode.Safe(code)}).") {
+    public string Code { get; } = ErrorCode.Safe(code);
     public int Status { get; } = status;
     public string? RequestId { get; } = requestId;
 }

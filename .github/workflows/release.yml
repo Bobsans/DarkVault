@@ -80,9 +80,18 @@ jobs:
         run: |
           $PSNativeCommandUseErrorActionPreference = $true
           $ErrorActionPreference = "Stop"
-          $audit = dotnet list server/DarkVault.Server/DarkVault.Server.csproj package --vulnerable --include-transitive --format json | ConvertFrom-Json
-          $vulnerable = @($audit.projects.frameworks.topLevelPackages) + @($audit.projects.frameworks.transitivePackages)
-          if (@($vulnerable | Where-Object { $_.vulnerabilities }).Count -ne 0) { throw "Vulnerable NuGet dependencies found" }
+          $nugetProjects = @(
+            'server/DarkVault.Server/DarkVault.Server.csproj',
+            'clients/csharp/DarkVault.Client/DarkVault.Client.csproj',
+            'clients/csharp/DarkVault.Extensions.Configuration/DarkVault.Extensions.Configuration.csproj',
+            'server/DarkVault.Server.Tests/DarkVault.Server.Tests.csproj',
+            'clients/csharp/DarkVault.Client.Tests/DarkVault.Client.Tests.csproj'
+          )
+          foreach ($project in $nugetProjects) {
+            $audit = dotnet list $project package --vulnerable --include-transitive --format json | ConvertFrom-Json
+            $vulnerable = @($audit.projects.frameworks.topLevelPackages) + @($audit.projects.frameworks.transitivePackages)
+            if (@($vulnerable | Where-Object { $_.vulnerabilities }).Count -ne 0) { throw "Vulnerable NuGet dependencies found in $project" }
+          }
           Push-Location cli
           try { go run golang.org/x/vuln/cmd/govulncheck@617f44b718537dccdea1915395650e0529e3b72e ./... } finally { Pop-Location }
           Push-Location clients/go
@@ -247,3 +256,78 @@ jobs:
         env:
           RELEASE_TAG: ${{ github.ref_name }}
         run: node tools/publish-npm.mjs "packages/darkvault-client-${RELEASE_TAG#v}.tgz" "${RELEASE_TAG#v}"
+  publish-container:
+    needs: release
+    runs-on: ubuntu-latest
+    environment: release
+    permissions:
+      contents: read
+    defaults:
+      run:
+        shell: pwsh
+    env:
+      RELEASE_TAG: ${{ github.ref_name }}
+      IMAGE_NAME: docker.io/${{ vars.DOCKERHUB_USERNAME }}/darkvault
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: native-server-linux-*
+          merge-multiple: true
+          path: artifacts/native-assets
+      - name: Prepare container context from verified Linux servers
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $root = (Get-Location).Path
+          $context = Join-Path $root 'artifacts/container'
+          $amd64 = Join-Path $context 'amd64'
+          $arm64 = Join-Path $context 'arm64'
+          New-Item -ItemType Directory -Force -Path $amd64, $arm64 | Out-Null
+          $archives = @{
+            amd64 = Join-Path $root "artifacts/native-assets/darkvault-server-$env:RELEASE_TAG-linux-x64.tar.gz"
+            arm64 = Join-Path $root "artifacts/native-assets/darkvault-server-$env:RELEASE_TAG-linux-arm64.tar.gz"
+          }
+          foreach ($arch in $archives.Keys) {
+            $archive = $archives[$arch]
+            if (!(Test-Path -LiteralPath $archive)) { throw "Missing verified Linux server archive: $archive" }
+            tar -xzf $archive -C (Join-Path $context $arch)
+          }
+          Copy-Item -LiteralPath (Join-Path $root 'deploy/Dockerfile') -Destination (Join-Path $context 'Dockerfile')
+      - name: Log in to Docker Hub
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4
+        with:
+          username: ${{ vars.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4
+      - name: Extract Docker image metadata
+        id: meta
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6
+        with:
+          images: ${{ env.IMAGE_NAME }}
+          flavor: |
+            latest=false
+          tags: |
+            type=semver,pattern={{version}}
+            type=sha
+      - name: Build and push multi-platform image
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7
+        with:
+          context: artifacts/container
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+      - name: Verify published image version
+        env:
+          IMAGE_VERSION: ${{ steps.meta.outputs.version }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $image = "$env:IMAGE_NAME`:$env:IMAGE_VERSION"
+          $expected = "$($env:RELEASE_TAG.Substring(1))+$env:GITHUB_SHA"
+          $actual = (docker run --rm $image --version).Trim()
+          if ($actual -cne $expected) { throw "Published image version mismatch: expected $expected, got $actual" }

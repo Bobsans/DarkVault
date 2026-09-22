@@ -70,14 +70,14 @@ def _data(operation: str, data: Any) -> dict[str, Any]:
         fields = ["key"] if secret else ["name", "description"]
         if secret:
             _uuid(item["bucketId"])
-            if item.get("type", "string") not in SECRET_TYPES:
+            if item["type"] not in SECRET_TYPES:
                 raise ValueError("Invalid secret type")
         if value:
             fields.append("value")
         if any(not isinstance(item[f], str) for f in fields):
             raise ValueError("Invalid record fields")
         if value:
-            parse_scalar(item["value"], item.get("type", "string"))
+            parse_scalar(item["value"], item["type"])
 
     if operation.endswith(".delete"):
         if data["deleted"] is not True:
@@ -231,12 +231,15 @@ class DarkVaultClient:
         if status != 200:
             raise DarkVaultError("key_unavailable", status)
         value = wire.loads(body)
-        if type(value["protocolVersion"]) is not int or value["protocolVersion"] != 1 or _date(value["notAfter"]) <= datetime.now(timezone.utc):
+        if set(value) != {"protocolVersion", "serverId", "serverTime", "kid", "publicKey", "notAfter", "limits"} or type(value["protocolVersion"]) is not int or value["protocolVersion"] != 1 or _date(value["notAfter"]) <= datetime.now(timezone.utc):
             raise ValueError("Invalid server key")
         _uuid(value["serverId"])
         _uuid(value["kid"])
         _date(value["serverTime"])
         wire.public_key(value["publicKey"])
+        limits = value["limits"]
+        if set(limits) != {"maxBodyBytes", "maxPlaintextBytes"} or type(limits["maxBodyBytes"]) is not int or not 1 <= limits["maxBodyBytes"] <= wire.MAX_BODY or type(limits["maxPlaintextBytes"]) is not int or not 1 <= limits["maxPlaintextBytes"] <= wire.MAX_PLAINTEXT:
+            raise ValueError("Invalid server limits")
         self._key = value
         self._key_until = time.monotonic() + 300
         return value

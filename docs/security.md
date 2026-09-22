@@ -69,7 +69,7 @@ Backend должен быть доступен только доверенном
 Перенос на другой домен требует продуманного восстановления/перерегистрации passkeys.
 
 Challenge живёт две минуты, хранится только в памяти сервера и потребляется
-однократно, включая неудачную попытку. Cookie challenge — Secure/HttpOnly/SameSite=Strict.
+однократно, включая неудачную попытку. Session и challenge cookies используют `__Secure-`, `Path=/admin`, Secure/HttpOnly/SameSite=Strict.
 Одновременно хранится максимум 100 challenge. Проверяются origin, RP ID,
 подпись, user verification и счётчик аутентификатора.
 

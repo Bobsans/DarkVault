@@ -21,6 +21,7 @@ public sealed class ConfigurationTests {
         Assert.That(tree["Years"]!["2026"]!.GetValue<string>(), Is.EqualTo("value"));
         Assert.That(tree.ContainsKey("Empty"), Is.True); Assert.That(tree["Empty"], Is.Null);
         values["Redis"] = SecretValues.Parse("conflict"); Assert.Throws<ArgumentException>(() => SecretValues.Configuration(values));
+        Assert.Throws<ArgumentException>(() => SecretValues.Configuration(new Dictionary<string, JsonElement> { ["Redis"] = SecretValues.Parse("x"), ["redis:Port"] = SecretValues.Parse("1") }));
         Assert.That(SecretValues.Configuration(values, false).ContainsKey("Redis:Port"), Is.True);
         foreach (var path in new[] { "A::B", "A:", ":A", "A\\x", "A\\", string.Join(":", Enumerable.Repeat("a", 17)) })
             Assert.Throws<ArgumentException>(() => SecretValues.Configuration(new Dictionary<string, JsonElement> { [path] = SecretValues.Parse("x") }));

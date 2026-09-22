@@ -54,13 +54,19 @@ public sealed class KeyRing : IDisposable {
         } finally { if (File.Exists(tmp)) File.Delete(tmp); }
     }
     private void ValidateState() {
-        if (!Guid.TryParse(state.ServerId, out _) || state.Data.Count == 0 || state.Data.All(k => k.Id != state.ActiveData))
-            throw new CryptographicException("Keyring has no valid active data key.");
+        if (!Guid.TryParse(state.ServerId, out _) || state.Data.Count == 0 || state.Data.All(k => k.Id != state.ActiveData) || state.Transport.Count == 0)
+            throw new CryptographicException("Keyring has no valid active key state.");
         foreach (var key in state.Data) {
             if (string.IsNullOrWhiteSpace(key.Id) || key.Uses < 0) throw new CryptographicException("Invalid data key metadata.");
             byte[] bytes;
             try { bytes = Convert.FromBase64String(key.Key); } catch (FormatException ex) { throw new CryptographicException("Invalid data key.", ex); }
             if (bytes.Length != 32) throw new CryptographicException("Invalid data key.");
+        }
+        foreach (var transport in state.Transport) {
+            if (string.IsNullOrWhiteSpace(transport.Id) || transport.NotAfter == default) throw new CryptographicException("Invalid transport key metadata.");
+            using var ec = Load(transport.PrivateKey);
+            var parameters = ec.ExportParameters(false);
+            if (parameters.Curve.Oid.Value != ECCurve.NamedCurves.nistP256.Oid.Value || parameters.Q.X is null || parameters.Q.Y is null) throw new CryptographicException("Invalid transport key.");
         }
     }
     private void Save() {
@@ -86,6 +92,9 @@ public sealed class KeyRing : IDisposable {
             state.Data.Add(key); state.ActiveData = key.Id; Save();
         }
     }
+    public void PruneUnusedDataKeys() {
+        lock (gate) { state.Data.RemoveAll(key => key.Id != state.ActiveData); Save(); }
+    }
     public void RotateTransport(bool emergency = false) {
         lock (gate) {
             using var ec = ECDsa.Create(ECCurve.NamedCurves.nistP256);
@@ -101,7 +110,7 @@ public sealed class KeyRing : IDisposable {
             var active = state.Transport[^1];
             using var ec = Load(active.PrivateKey);
             return new(1, state.ServerId, DateTimeOffset.UtcNow, active.Id, Wire.Export(ec), active.NotAfter,
-                new TransportLimits(Wire.MaxBody, Wire.MaxPlaintext));
+                new DarkVault.Client.TransportLimits(Wire.MaxBody, Wire.MaxPlaintext));
         }
     }
     public string DecryptRequest(string compact) {

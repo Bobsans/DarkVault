@@ -10,17 +10,17 @@ export interface Bucket {
     id: string; name: string; description: string; revision: number; createdAt: string; updatedAt: string;
 }
 export interface SecretMetadata {
-    id: string; bucketId: string; key: string; revision: number; createdAt: string; updatedAt: string; type?: SecretType;
+    id: string; bucketId: string; key: string; revision: number; createdAt: string; updatedAt: string; type: SecretType;
 }
 export interface Secret extends SecretMetadata { value: string }
-export interface BucketSnapshot { bucketId: string; revision: number; secrets: Record<string, string>; types?: Record<string, SecretType> }
+export interface BucketSnapshot { bucketId: string; revision: number; secrets: Record<string, string>; types: Record<string, SecretType> }
 export interface Page<T> { items: T[]; nextCursor: string | null }
 export interface TokenInfo {
     id: string; name: string; scopes: string[]; bucketIds: string[]; allBuckets: boolean;
     creatableBucketNames: string[]; expiresAt: string | null;
 }
 export interface ClientOptions { timeoutMs?: number; fetch?: typeof globalThis.fetch }
-type ServerKey = { protocolVersion: number; serverId: string; kid: string; publicKey: JWK; notAfter: string };
+type ServerKey = { protocolVersion: number; serverId: string; serverTime: string; kid: string; publicKey: JWK; notAfter: string; limits: { maxBodyBytes: number; maxPlaintextBytes: number } };
 
 function retryAfterMs(value: string | null): number {
     if (!value) return 0;
@@ -37,6 +37,18 @@ function revision(value: number): number {
 function pageLimit(value: number): number {
     if (!Number.isInteger(value) || value < 1 || value > 200) throw new TypeError('Limit must be between 1 and 200.');
     return value;
+}
+
+function validateData(operation: string, data: unknown): void {
+    if (!data || typeof data !== "object" || Array.isArray(data)) throw new DarkVaultError("invalid_response");
+    const object = data as Record<string, unknown>; const required = (...fields: string[]) => { if (fields.some(field => !(field in object))) throw new DarkVaultError("invalid_response"); };
+    const stringMap = (value: unknown) => { if (!value || typeof value !== "object" || Array.isArray(value) || Object.values(value).some(entry => typeof entry !== "string")) throw new DarkVaultError("invalid_response"); };
+    if (operation.endsWith(".delete")) { if (object.deleted !== true) throw new DarkVaultError("invalid_response"); return; }
+    if (operation.endsWith(".list")) { if (!Array.isArray(object.items) || !("nextCursor" in object) || (object.nextCursor !== null && typeof object.nextCursor !== "string")) throw new DarkVaultError("invalid_response"); return; }
+    if (operation === "bucket.read") { required("bucketId", "revision", "secrets", "types"); stringMap(object.secrets); stringMap(object.types); return; }
+    if (operation === "token.info") { required("id", "name", "scopes", "bucketIds", "allBuckets", "creatableBucketNames", "expiresAt"); return; }
+    if (operation.startsWith("secret.")) { required("id", "bucketId", "key", "revision", "createdAt", "updatedAt", "type"); if (operation === "secret.read") required("value"); return; }
+    required("id", "name", "description", "revision", "createdAt", "updatedAt");
 }
 
 export class DarkVaultClient {
@@ -106,10 +118,10 @@ export class DarkVaultClient {
                 if (!discovery.ok) { await discovery.body?.cancel(); throw new DarkVaultError('key_unavailable', discovery.status); }
                 const candidate = parseStrict(await readBounded(discovery)) as ServerKey;
                 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-                if (!candidate || candidate.protocolVersion !== 1 || typeof candidate.serverId !== 'string' || typeof candidate.kid !== 'string' || typeof candidate.notAfter !== 'string' || !uuid.test(candidate.serverId) || !uuid.test(candidate.kid) ||
-                    !Number.isFinite(Date.parse(candidate.notAfter)) || Date.parse(candidate.notAfter) <= Date.now() ||
-                    candidate.publicKey?.kty !== 'EC' || candidate.publicKey?.crv !== 'P-256' ||
-                    Object.keys(candidate.publicKey).sort().join(',') !== 'crv,kty,x,y') throw new DarkVaultError('invalid_server_key');
+                if (!candidate || Object.keys(candidate).sort().join(",") !== "kid,limits,notAfter,protocolVersion,publicKey,serverId,serverTime" || candidate.protocolVersion !== 1 || typeof candidate.serverId !== "string" || typeof candidate.serverTime !== "string" || typeof candidate.kid !== "string" || typeof candidate.notAfter !== "string" || !uuid.test(candidate.serverId) || !uuid.test(candidate.kid) || !Number.isFinite(Date.parse(candidate.serverTime)) || !Number.isFinite(Date.parse(candidate.notAfter)) || Date.parse(candidate.notAfter) <= Date.now() ||
+            !candidate.limits || !Number.isSafeInteger(candidate.limits.maxBodyBytes) || candidate.limits.maxBodyBytes < 1 || candidate.limits.maxBodyBytes > 2 * 1024 * 1024 || !Number.isSafeInteger(candidate.limits.maxPlaintextBytes) || candidate.limits.maxPlaintextBytes < 1 || candidate.limits.maxPlaintextBytes > 1536 * 1024 ||
+            candidate.publicKey?.kty !== 'EC' || candidate.publicKey?.crv !== 'P-256' ||
+            Object.keys(candidate.publicKey).sort().join(',') !== 'crv,kty,x,y') throw new DarkVaultError('invalid_server_key');
                 key = candidate;
                 this.#serverKey = key;
                 this.#serverKeyUntil = Math.min(Date.now() + 300_000, Date.parse(key.notAfter));
@@ -134,7 +146,7 @@ export class DarkVaultClient {
                 if (response.ok) throw new DarkVaultError('unencrypted_response', response.status, request.payload.requestId, retryAfter);
                 throw new DarkVaultError(code, response.status, request.payload.requestId, retryAfter);
             }
-            let data: unknown;
+        let data: unknown;
             try { data = await decryptResponse(await readBounded(response), request, response.status); }
             catch (error) {
                 deadline.throwIfAborted();
@@ -142,6 +154,7 @@ export class DarkVaultClient {
                 throw new DarkVaultError('invalid_response', response.status, request.payload.requestId);
             }
             deadline.throwIfAborted();
+            validateData(operation, data);
             return data as T;
         }
     }

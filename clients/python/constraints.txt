@@ -1,0 +1,6 @@
+# Runtime constraints used by repository verification; refresh deliberately with a reviewed dependency update.
+cffi==2.1.1
+cryptography==50.0.1
+jwcrypto==1.6.1
+pycparser==3.0
+typing_extensions==4.16.0

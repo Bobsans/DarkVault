@@ -128,9 +128,14 @@ async function session() {
     $('login').hidden = authenticated; $('workspace').hidden = !authenticated;
     if (authenticated) await renderRoute(); else lockWorkspace();
 }
+const MAX_UI_ITEMS = 1000;
+
 async function all<T>(op: string, parameters: object = {}): Promise<T[]> {
     const items: T[] = []; let cursor: string | null = null;
-    do { const page: Page<T> = await api<Page<T>>(op, { ...parameters, limit: 200, cursor }); items.push(...page.items); cursor = page.nextCursor; } while (cursor);
+    do { const page: Page<T> = await api<Page<T>>(op, { ...parameters, limit: 200, cursor });
+        if (items.length + page.items.length > MAX_UI_ITEMS) throw new Error("Too many items for this view; use the paginated API.");
+        items.push(...page.items); cursor = page.nextCursor;
+    } while (cursor);
     return items;
 }
 function route() {

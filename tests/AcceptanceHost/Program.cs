@@ -44,18 +44,7 @@ Run("bucket.create", new { name = "interop" });
 var issued = JsonSerializer.SerializeToElement(Run("token.create", new { name = "acceptance", scopes = VaultStore.Scopes, bucketIds = Array.Empty<string>(), allBuckets = true, creatableBucketNames = Array.Empty<string>(), expiresAt = (string?)null }), Wire.Json);
 var tokenFile = Path.Combine(state, "test.token"); KeyRing.SavePrivate(tokenFile, issued.GetProperty("token").GetString()!);
 var fixturePath = Path.Combine(root, "tests", "fixtures", "jwe.json");
-if (!File.Exists(fixturePath)) {
-    using var key = ECDsa.Create(ECCurve.NamedCurves.nistP256); var p = key.ExportParameters(true);
-    var publicKey = Wire.Export(key);
-    const string plaintext = "{\"value\":\"Unicode: 秘密\\nline\",\"empty\":\"\"}";
-    var compact = Wire.Encrypt(plaintext, publicKey, "interop-test", "darkvault-response+jwe");
-    Directory.CreateDirectory(Path.GetDirectoryName(fixturePath)!);
-    await File.WriteAllTextAsync(fixturePath, Wire.Serialize(new { notice = "PUBLIC TEST KEY. Never use in production.",
-        jwk = new { kty = "EC", crv = "P-256", x = publicKey.X, y = publicKey.Y, d = Wire.Base64(p.D!) },
-        kid = "interop-test", type = "darkvault-response+jwe", plaintext, compact,
-        token = "dv1_" + Wire.Base64(Enumerable.Range(0,45).Select(i => (byte)i).ToArray()),
-        tokenHash = Wire.HashToken("dv1_" + Wire.Base64(Enumerable.Range(0,45).Select(i => (byte)i).ToArray())) }));
-}
+if (!File.Exists(fixturePath)) throw new FileNotFoundException("The shared public JWE fixture is required.", fixturePath);
 await File.WriteAllTextAsync(Path.Combine(root, ".local", "acceptance.json"), Wire.Serialize(new { url = "https://127.0.0.1:18866", ca, tokenFile }));
 // Seed the same temporary state for testing the published native server instead of this host.
 if (args.Skip(1).SequenceEqual(["--prepare"])) return;

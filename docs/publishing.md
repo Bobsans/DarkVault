@@ -153,8 +153,28 @@ go get github.com/Bobsans/DarkVault/clients/go/v2@v2.0.0
 Появление в proxy и pkg.go.dev может запаздывать. При необходимости запросите
 конкретную версию через `go list -m github.com/Bobsans/DarkVault/clients/go/v2@v2.0.0`
 или откройте страницу модуля на pkg.go.dev. [Публикация Go-модулей](https://go.dev/doc/modules/publishing).
-Сервер и CLI скачиваются из GitHub Releases; публикация в Docker Hub, winget,
+Сервер и CLI скачиваются из GitHub Releases; кроме Docker Hub, публикация в winget,
 Chocolatey и Homebrew в этот workflow не входит.
+
+## Docker Hub
+
+Релизный образ сервера публикуется в публичный репозиторий
+[`bobsans/darkvault`](https://hub.docker.com/r/bobsans/darkvault) после успешной
+сборки и проверки GitHub Release.
+
+Workflow использует Docker Hub access token, сохранённый как secret
+`DOCKERHUB_TOKEN`, и переменную environment `DOCKERHUB_USERNAME`.
+Постоянный пароль в workflow не используется.
+
+Публикуются только Linux-образы `amd64` и `arm64` с тегами:
+
+```text
+docker.io/bobsans/darkvault:2.1.0
+docker.io/bobsans/darkvault:sha-<short-commit>
+```
+
+Публикация контейнера — отдельная job после `release`; при её сбое повторите только
+эту job. Исправления уже выпущенной версии требуют нового PATCH-тега
 
 ## Выпуск и восстановление после ошибки
 

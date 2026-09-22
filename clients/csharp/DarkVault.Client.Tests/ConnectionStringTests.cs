@@ -40,6 +40,35 @@ public sealed class ConnectionStringTests {
         Assert.Throws<InvalidOperationException>(() => legacy.ReadBucketSnapshotAsync());
     }
 
+    [Test]
+    public void CustomHttpClientRedirectIsRejected() {
+        const string token = "dv1_" + "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
+        using var http = new HttpClient(new RedirectHandler());
+        using var client = new DarkVaultClient("https://vault.example.com", token, http);
+        var error = Assert.ThrowsAsync<DarkVaultException>(async () => await client.ReadBucketAsync("qa"));
+        Assert.That(error!.Code, Is.EqualTo("redirect_rejected"));
+    }
+
+    [Test]
+    public void InvalidUtf8DiscoveryIsMappedToSafeError() {
+        const string token = "dv1_" + "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
+        using var http = new HttpClient(new InvalidUtf8Handler());
+        using var client = new DarkVaultClient("https://vault.example.com", token, http);
+        var error = Assert.ThrowsAsync<DarkVaultException>(async () => await client.ReadBucketAsync("qa"));
+        Assert.That(error!.Code, Is.EqualTo("invalid_response"));
+    }
+
+    private sealed class RedirectHandler : HttpMessageHandler {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) =>
+            Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { RequestMessage = new HttpRequestMessage(HttpMethod.Get, "https://vault.example.com/other") });
+    }
+
+    private sealed class InvalidUtf8Handler : HttpMessageHandler {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) {
+            var content = new ByteArrayContent([0xff]); content.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("application/json");
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = content, RequestMessage = request });
+        }
+    }
     private sealed class OriginHandler(string expected) : HttpMessageHandler {
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) {
             Assert.That(request.RequestUri!.AbsoluteUri, Is.EqualTo(expected));

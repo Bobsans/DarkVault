@@ -3,6 +3,7 @@ using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
+using System.Text;
 using System.Text.Json;
 using DarkVault.Client;
 using DarkVault.Server;
@@ -23,7 +24,7 @@ public sealed class SecurityTests {
         var wrapping = RandomNumberGenerator.GetBytes(32); var path = Path.Combine(directory, "keys.json");
         try {
             string serverId;
-            var metadata = new SecretMetadata(Guid.NewGuid().ToString(), Guid.NewGuid().ToString(), "test", 1, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow);
+            var metadata = new SecretMetadata(Guid.NewGuid().ToString(), Guid.NewGuid().ToString(), "test", 1, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow, "string");
             EncryptedValue encrypted;
             using (var original = new KeyRing(path, true, wrapping)) { serverId = original.ServerId; encrypted = original.Encrypt("wrapped-test-secret", metadata); original.RotateData(); original.Protect(); }
             var json = File.ReadAllText(path);
@@ -65,6 +66,7 @@ public sealed class SecurityTests {
         host.Http.DefaultRequestHeaders.Add("X-CSRF-Token", session.GetProperty("csrfToken").GetString());
         using var authenticator = new TestPasskey();
         using var login = await host.Http.PostAsJsonAsync(host.Url + "/admin/login", new { username = "admin", password });
+        var challengeCookies = login.Headers.GetValues("Set-Cookie").ToArray(); Assert.That(challengeCookies.Any(cookie => cookie.StartsWith("__Secure-DarkVault-Mfa=", StringComparison.Ordinal) && cookie.Contains("Path=/admin", StringComparison.OrdinalIgnoreCase)), Is.True); Assert.That(challengeCookies.Any(cookie => cookie.Contains("__Host-", StringComparison.Ordinal)), Is.False);
         var options = await login.Content.ReadFromJsonAsync<JsonElement>();
         var before = await host.Http.GetFromJsonAsync<JsonElement>(host.Url + "/admin/api/v1/session");
         Assert.That(before.GetProperty("authenticated").GetBoolean(), Is.False);
@@ -72,6 +74,7 @@ public sealed class SecurityTests {
         Assert.That(denied.StatusCode, Is.EqualTo(HttpStatusCode.Unauthorized));
         var credential = authenticator.Response(host.Url, options);
         using var verified = await host.Http.PostAsJsonAsync(host.Url + "/admin/mfa/verify", new { credential });
+        var sessionCookies = verified.Headers.GetValues("Set-Cookie").ToArray(); Assert.That(sessionCookies.Any(cookie => cookie.StartsWith("__Secure-DarkVault=", StringComparison.Ordinal) && cookie.Contains("Path=/admin", StringComparison.OrdinalIgnoreCase)), Is.True);
         Assert.That(verified.IsSuccessStatusCode, Is.True, await verified.Content.ReadAsStringAsync());
         var codes = (await verified.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("recoveryCodes");
         var recovery = codes[0].GetString();
@@ -224,6 +227,16 @@ public sealed class SecurityTests {
         public override DateTimeOffset GetUtcNow() => Now;
     }
 
+    [Test]
+    public async Task AdminCredentialBodiesHaveASeparateBoundedLimit() {
+        await using var host = await Host.Start([]);
+        host.Http.DefaultRequestHeaders.Add("Origin", host.Url);
+        var session = await host.Http.GetFromJsonAsync<JsonElement>(host.Url + "/admin/api/v1/session");
+        host.Http.DefaultRequestHeaders.Add("X-CSRF-Token", session!.GetProperty("csrfToken").GetString());
+        using var body = new StringContent(new string('x', 70 * 1024), Encoding.UTF8, "application/json");
+        using var response = await host.Http.PostAsync(host.Url + "/admin/login", body);
+        Assert.That((int)response.StatusCode, Is.EqualTo(413));
+    }
     private sealed class Host : IAsyncDisposable {
         private readonly string directory;
         public string Directory => directory;

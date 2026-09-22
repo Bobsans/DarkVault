@@ -154,8 +154,9 @@ public sealed class HttpTests {
             Assert.That(requests.All(e => e.GetProperty("sourceIp").GetString() == "198.51.100.42"), Is.True);
             Assert.That(requests.All(e => e.GetProperty("peerIp").GetString() is "127.0.0.1" or "::ffff:127.0.0.1"), Is.True);
             Assert.That(requests.All(e => e.GetProperty("durationMs").GetDouble() >= 0 && Guid.TryParse(e.GetProperty("traceId").GetString(), out _)), Is.True);
-            foreach (var path in new[] { "/health/ready", "/api/v1/execute", "/admin/api/v1/session" })
+            foreach (var path in new[] { "/api/v1/execute", "/admin/api/v1/session" })
                 Assert.That(requests.Any(e => e.GetProperty("path").GetString() == path), Is.True, path);
+            Assert.That(requests.Any(e => e.GetProperty("path").GetString() == "/health/ready"), Is.False);
             Assert.That(requests.Any(e => e.GetProperty("principal").GetString() == "anonymous" || e.GetProperty("statusCode").GetInt32() == 429), Is.False);
             foreach (var result in new[] { "invalid_envelope", "revision_conflict" })
                 Assert.That(requests.Any(e => e.GetProperty("result").GetString() == result), Is.True, result);

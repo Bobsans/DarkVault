@@ -32,12 +32,31 @@ public static class SecretValues {
         };
         return (Normalize(type == "string" ? value.GetString()! : value.GetRawText(), type), type);
     }
+    public static void ValidateConfigurationPaths(IEnumerable<string> keys) {
+        var paths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var leaves = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var key in keys) {
+            var parts = Path(key); var prefix = new System.Text.StringBuilder();
+            for (var i = 0; i < parts.Length; i++) {
+                if (i > 0) prefix.Append(':');
+                prefix.Append(parts[i]); var current = prefix.ToString();
+                if (i < parts.Length - 1) {
+                    if (leaves.Contains(current)) throw new ArgumentException("Configuration paths conflict.");
+                    paths.Add(current);
+                } else {
+                    if (!paths.Add(current)) throw new ArgumentException("Configuration paths conflict.");
+                    leaves.Add(current);
+                }
+            }
+        }
+    }
     public static Dictionary<string, JsonElement> Typed(BucketSnapshot snapshot) {
-        if (snapshot.Types is not null && snapshot.Types.Keys.Any(k => !snapshot.Secrets.ContainsKey(k)))
+        if (snapshot.Secrets.Any(p => p.Value is null) || snapshot.Types.Keys.Any(k => !snapshot.Secrets.ContainsKey(k)))
             throw new FormatException("Invalid secret type map.");
-        return snapshot.Secrets.ToDictionary(p => p.Key, p => Parse(p.Value ?? "", snapshot.Types?.GetValueOrDefault(p.Key) ?? "string"), StringComparer.Ordinal);
+        return snapshot.Secrets.ToDictionary(p => p.Key, p => Parse(p.Value!, snapshot.Types.GetValueOrDefault(p.Key) ?? "string"), StringComparer.Ordinal);
     }
     public static JsonObject Configuration(IReadOnlyDictionary<string, JsonElement> values, bool nested = true) {
+        if (nested) ValidateConfigurationPaths(values.Keys);
         var root = new JsonObject();
         foreach (var (key, value) in values) {
             _ = Encode(value);

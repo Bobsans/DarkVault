@@ -14,6 +14,7 @@ public sealed partial class VaultStore : IDisposable {
     private readonly KeyRing ring;
     // ponytail: single-instance serialized transactions; use a shared database before adding replicas.
     private readonly object gate = new();
+    private DateTimeOffset lastAuditCleanup;
     public static readonly string[] Scopes = ["secret:read", "secret:write", "secret:delete", "secret:list", "bucket:create", "bucket:read", "bucket:list", "bucket:delete", "bucket:write"];
     public VaultStore(string path, KeyRing ring) {
         this.ring = ring;
@@ -27,10 +28,11 @@ public sealed partial class VaultStore : IDisposable {
                 name TEXT NOT NULL, json TEXT NOT NULL, keyid TEXT NOT NULL, nonce TEXT NOT NULL, UNIQUE(bucket,name), UNIQUE(keyid,nonce));
             CREATE TABLE IF NOT EXISTS tokens (id TEXT PRIMARY KEY, hash TEXT UNIQUE NOT NULL, json TEXT NOT NULL);
             CREATE TABLE IF NOT EXISTS replay (principal TEXT NOT NULL, id TEXT NOT NULL, expires INTEGER NOT NULL, PRIMARY KEY(principal,id));
-            CREATE TABLE IF NOT EXISTS audit (id INTEGER PRIMARY KEY AUTOINCREMENT, time TEXT NOT NULL, json TEXT NOT NULL);
+            CREATE TABLE IF NOT EXISTS audit (id INTEGER PRIMARY KEY AUTOINCREMENT, time TEXT NOT NULL, json TEXT NOT NULL, search TEXT NOT NULL DEFAULT '');
             CREATE INDEX IF NOT EXISTS audit_time ON audit(time);
             INSERT OR IGNORE INTO settings VALUES ('revision','0');
             """);
+        EnsureAuditSearchSchema();
         // Validate existing ciphertext before the instance accepts commands after recovery.
         Verify();
     }
@@ -126,13 +128,38 @@ public sealed partial class VaultStore : IDisposable {
             ? Scalar("SELECT id FROM entries WHERE bucket=$p0 AND name=$p1", id, k.GetString()) as string : null;
         return (id, secretId);
     }
+    private void EnsureAuditSearchSchema() {
+        try { using var command = Command("SELECT search FROM audit LIMIT 1"); command.ExecuteScalar(); } catch (SqliteException) { Execute("ALTER TABLE audit ADD COLUMN search TEXT NOT NULL DEFAULT ''"); }
+        Execute("CREATE INDEX IF NOT EXISTS audit_search_id ON audit(search,id)");
+        Execute("UPDATE audit SET search = trim(coalesce(json_extract(json,'$.operation'),'') || ' ' || coalesce(json_extract(json,'$.principal'),'') || ' ' || coalesce(json_extract(json,'$.principalName'),'') || ' ' || coalesce(json_extract(json,'$.sourceIp'),'') || ' ' || coalesce(json_extract(json,'$.path'),'') || ' ' || coalesce(json_extract(json,'$.requestId'),'') || ' ' || coalesce(json_extract(json,'$.traceId'),'') || ' ' || coalesce(json_extract(json,'$.details'),'') || ' ' || coalesce(json_extract(json,'$.bucketId'),'') || ' ' || coalesce(json_extract(json,'$.secretId'),'')) WHERE search = ''");
+    }
+    private static string AuditSearch(AuditEntry entry) {
+        var values = new List<string?> {
+            entry.Operation, entry.Principal, entry.Result, entry.Kind, entry.PrincipalType, entry.PrincipalName,
+            entry.SourceIp, entry.PeerIp, entry.Method, entry.Path, entry.RequestId, entry.TraceId, entry.BucketId, entry.SecretId,
+            entry.StatusCode?.ToString(CultureInfo.InvariantCulture), entry.DurationMs?.ToString(CultureInfo.InvariantCulture)
+        };
+        if (entry.Details is { } details) {
+            values.AddRange([details.Bucket, details.Key, details.TokenId,
+                details.ExpectedRevision?.ToString(CultureInfo.InvariantCulture), details.Recursive?.ToString(), details.ReturnedCount?.ToString(CultureInfo.InvariantCulture)]);
+            values.AddRange(details.Resources.SelectMany(resource => new[] {
+                resource.Kind, resource.Id, resource.Name, resource.BucketId, resource.Type,
+                resource.Revision?.ToString(CultureInfo.InvariantCulture)
+            }));
+            if (details.Token is { } token) values.AddRange([token.Id, token.Name, token.AllBuckets.ToString(), token.ExpiresAt?.ToString("O"), .. token.Scopes, .. token.BucketIds, .. token.CreatableBucketNames]);
+        }
+        return string.Join(' ', values.Where(value => !string.IsNullOrWhiteSpace(value)));
+    }
     private void Audit(AuditEntry entry) {
-        Execute("DELETE FROM audit WHERE time < $p0", entry.Time.AddDays(-90).ToString("O"));
-        // Keep bulk reads/deletes readable through the bounded JWE transport without dropping objects.
+        // ponytail: hourly retention maintenance; avoid a DELETE write on every audit event.
+        if (lastAuditCleanup == default || entry.Time - lastAuditCleanup >= TimeSpan.FromHours(1)) {
+            Execute("DELETE FROM audit WHERE time < $p0", entry.Time.AddDays(-90).ToString("O"));
+            lastAuditCleanup = entry.Time;
+        }
+        void Insert(AuditEntry value) => Execute("INSERT INTO audit(time,json,search) VALUES ($p0,$p1,$p2)", value.Time.ToString("O"), ServerJson.Serialize(value), AuditSearch(value));
         if (entry.Details is { Resources.Length: > 200 } details) {
-            foreach (var chunk in details.Resources.Chunk(200))
-                Execute("INSERT INTO audit(time,json) VALUES ($p0,$p1)", entry.Time.ToString("O"), ServerJson.Serialize(entry with { Details = details with { Resources = chunk } }));
-        } else Execute("INSERT INTO audit(time,json) VALUES ($p0,$p1)", entry.Time.ToString("O"), ServerJson.Serialize(entry));
+            foreach (var chunk in details.Resources.Chunk(200)) Insert(entry with { Details = details with { Resources = chunk } });
+        } else Insert(entry);
     }
     private void AuditOperation(Principal principal, string operation, string requestId, string result,
         (string? BucketId, string? SecretId) target, AuditDetails details, RequestAudit? context) =>
@@ -393,11 +420,7 @@ public sealed partial class VaultStore : IDisposable {
                 AND ($p2 = '' OR coalesce(json_extract(json,'$.kind'),'operation') = $p2)
                 AND ($p3 = '' OR ($p3 = 'success' AND json_extract(json,'$.result') = 'success')
                     OR ($p3 = 'failure' AND json_extract(json,'$.result') != 'success'))
-                AND ($p4 = '' OR (coalesce(json_extract(json,'$.operation'),'') || ' ' || coalesce(json_extract(json,'$.principal'),'') || ' ' ||
-                    coalesce(json_extract(json,'$.principalName'),'') || ' ' || coalesce(json_extract(json,'$.sourceIp'),'') || ' ' ||
-                    coalesce(json_extract(json,'$.path'),'') || ' ' || coalesce(json_extract(json,'$.requestId'),'') || ' ' ||
-                    coalesce(json_extract(json,'$.traceId'),'') || ' ' || coalesce(json_extract(json,'$.details'),'') || ' ' ||
-                    coalesce(json_extract(json,'$.bucketId'),'') || ' ' || coalesce(json_extract(json,'$.secretId'),'')) LIKE $p5 ESCAPE '\')
+                AND ($p4 = '' OR search LIKE $p5 ESCAPE '\')
                 ORDER BY id {(descending ? "DESC" : "ASC")} LIMIT $p1
                 """, after, limit + 1, kind, result, search, pattern);
             using var r = cmd.ExecuteReader(); var items = new List<JsonElement>(); long last = after; var bytes = 0; var more = false;
@@ -418,9 +441,20 @@ public sealed partial class VaultStore : IDisposable {
                 SaveSecret(stored.Metadata, ring.Decrypt(stored.Value, stored.Metadata));
                 tx.Commit();
             }
+            ring.PruneUnusedDataKeys();
         }
     }
-    public void Verify() { lock (gate) { foreach (var s in Many<StoredSecret>("SELECT json FROM entries")) _ = ring.Decrypt(s.Value, s.Metadata); _ = Scalar("SELECT count(*) FROM buckets"); } }
+    public void Verify() {
+        lock (gate) {
+            if (!long.TryParse((string?)Scalar("SELECT json FROM settings WHERE id='revision'"), NumberStyles.Integer, CultureInfo.InvariantCulture, out var revision) || revision < 0) throw new CryptographicException("Invalid revision state.");
+            _ = Administrator; _ = Mfa;
+            foreach (var bucket in Many<Bucket>("SELECT json FROM buckets")) ValidateName(bucket.Name);
+            foreach (var secret in Many<StoredSecret>("SELECT json FROM entries")) _ = ring.Decrypt(secret.Value, secret.Metadata);
+            _ = Many<TokenRecord>("SELECT json FROM tokens");
+            _ = Many<AuditEntry>("SELECT json FROM audit");
+            _ = ring.Public();
+        }
+    }
     public void Ready() { lock (gate) { _ = Scalar("SELECT 1"); _ = ring.Public(); } }
     public void Backup(string destination) { lock (gate) { if (File.Exists(destination)) throw new IOException("Backup destination exists."); using var target = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = destination, Pooling = false }.ToString()); target.Open(); db.BackupDatabase(target); } }
     public sealed record Admin(string Id, string Hash, string Stamp);

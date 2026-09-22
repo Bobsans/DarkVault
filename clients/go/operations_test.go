@@ -40,6 +40,25 @@ func TestValidationAndRedirects(t *testing.T) {
 	}
 }
 
+func TestResponseAndOperationSchemasRejectMissingFields(t *testing.T) {
+	var response Response
+	if err := json.Unmarshal([]byte(`{"v":1,"requestId":"id","serverId":"server","audience":"data","operation":"bucket.read","status":200,"data":{}}`), &response); err == nil {
+		t.Fatal("missing error accepted")
+	}
+	for _, test := range []struct {
+		operation string
+		data      string
+	}{
+		{"bucket.list", `{"items":[]}`},
+		{"bucket.delete", `{"deleted":false}`},
+		{"bucket.read", `{"bucketId":"id","revision":1,"secrets":{},"types":{"K":null}}`},
+	} {
+		if err := validateData(test.operation, json.RawMessage(test.data)); err == nil {
+			t.Fatalf("invalid %s data accepted", test.operation)
+		}
+	}
+}
+
 func TestLiveOperations(t *testing.T) {
 	path := os.Getenv("DARKVAULT_ACCEPTANCE")
 	if path == "" {

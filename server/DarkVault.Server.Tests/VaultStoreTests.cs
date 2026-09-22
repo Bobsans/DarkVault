@@ -121,11 +121,12 @@ public sealed class VaultStoreTests {
         Run<Bucket>("bucket.create", new { name = "qa" });
         Run<SecretMetadata>("secret.create", new { bucket = "qa", key = "ConnectionStrings:Main", value = "秘密\nline" });
         store.Reencrypt(); store.Verify();
+        using (var keyring = JsonDocument.Parse(File.ReadAllText(Path.Combine(directory, "keyring.json")))) Assert.That(keyring.RootElement.GetProperty("data").GetArrayLength(), Is.EqualTo(1));
         var before = Run<BucketSnapshot>("bucket.read", new { bucket = "qa" });
         var copy = Path.Combine(directory, "copy.db"); store.Backup(copy);
         using (var restored = new VaultStore(copy, new KeyRing(Path.Combine(directory, "keyring.json"), false))) restored.Verify();
         Assert.That(before.Secrets["ConnectionStrings:Main"], Is.EqualTo("秘密\nline"));
-        var meta = new SecretMetadata(Guid.NewGuid().ToString(), Guid.NewGuid().ToString(), "key", 1, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow);
+        var meta = new SecretMetadata(Guid.NewGuid().ToString(), Guid.NewGuid().ToString(), "key", 1, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow, "string");
         var value = ring.Encrypt("secret", meta);
         Assert.Throws<AuthenticationTagMismatchException>(() => ring.Decrypt(value, meta with { Key = "other" }));
         Assert.Throws<InvalidOperationException>(() => new KeyRing(Path.Combine(directory, "missing"), false));
@@ -214,7 +215,8 @@ public sealed class VaultStoreTests {
         Assert.That(SecretValues.Typed(snapshot)["Nothing"].ValueKind, Is.EqualTo(JsonValueKind.Null));
         var encrypted = ring.Encrypt("100", number);
         Assert.Throws<AuthenticationTagMismatchException>(() => ring.Decrypt(encrypted, number with { Type = "string" }));
-        store.Reencrypt(); store.Verify(); store.Dispose(); store = new(Path.Combine(directory, "vault.db"), ring);
+        store.Reencrypt(); store.Verify();
+        using (var keyring = JsonDocument.Parse(File.ReadAllText(Path.Combine(directory, "keyring.json")))) Assert.That(keyring.RootElement.GetProperty("data").GetArrayLength(), Is.EqualTo(1)); store.Dispose(); store = new(Path.Combine(directory, "vault.db"), ring);
         Assert.That(Run<Secret>("secret.read", new { bucket = "typed", key = "Count" }).GetTypedValue().GetDouble(), Is.EqualTo(100));
         var revision = Run<Bucket>("bucket.get", new { bucket = "typed" }).Revision;
         Run<SecretMetadata>("secret.update", new { bucket = "typed", key = "Count", value = "true", type = "boolean", expectedRevision = number.Revision });
@@ -223,7 +225,7 @@ public sealed class VaultStoreTests {
     }
     [Test]
     public void LegacyStringEncryptionRemainsReadableAndCannotAcquireAType() {
-        var metadata = new SecretMetadata(Guid.NewGuid().ToString(), Guid.NewGuid().ToString(), "key", 1, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow);
+        var metadata = new SecretMetadata(Guid.NewGuid().ToString(), Guid.NewGuid().ToString(), "key", 1, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow, "string");
         using var state = JsonDocument.Parse(File.ReadAllText(Path.Combine(directory, "keyring.json")));
         var key = state.RootElement.GetProperty("data")[0];
         var plain = Encoding.UTF8.GetBytes("legacy-value"); var nonce = RandomNumberGenerator.GetBytes(12); var cipher = new byte[plain.Length]; var tag = new byte[16];

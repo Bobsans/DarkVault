@@ -116,10 +116,10 @@ public sealed class DarkVaultClient : IDisposable {
                 if (current is null || DateTimeOffset.UtcNow - keyFetched > TimeSpan.FromMinutes(5) || current.NotAfter <= DateTimeOffset.UtcNow) {
                     using var discovery = new HttpRequestMessage(HttpMethod.Get, new Uri(endpoint, "api/v1/crypto/key"));
                     using var response = await http.SendAsync(discovery, HttpCompletionOption.ResponseHeadersRead, ct);
-                    EnsureOrigin(response);
+                    EnsureOrigin(response, discovery.RequestUri!);
                     if (!response.IsSuccessStatusCode) throw new DarkVaultException("key_unavailable", (int)response.StatusCode);
                     current = Wire.Parse<CryptoKey>(await Wire.ReadBodyAsync(await response.Content.ReadAsStreamAsync(ct), ct));
-                    if (current.ProtocolVersion != 1 || current.NotAfter <= DateTimeOffset.UtcNow || !Guid.TryParse(current.ServerId, out _))
+                    if (current.ProtocolVersion != 1 || current.NotAfter <= DateTimeOffset.UtcNow || !Guid.TryParse(current.ServerId, out _) || !Guid.TryParse(current.Kid, out _) || current.ServerTime.Offset != TimeSpan.Zero || current.Limits.MaxBodyBytes is < 1 or > Wire.MaxBody || current.Limits.MaxPlaintextBytes is < 1 or > Wire.MaxPlaintext)
                         throw new DarkVaultException("invalid_key", 0);
                     using var validated = Wire.Import(current.PublicKey);
                     key = current; keyFetched = DateTimeOffset.UtcNow;
@@ -134,7 +134,7 @@ public sealed class DarkVaultClient : IDisposable {
                 message.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/jose"));
                 message.Content = new StringContent(body, Encoding.UTF8, "application/jose");
                 using var result = await http.SendAsync(message, HttpCompletionOption.ResponseHeadersRead, ct);
-                EnsureOrigin(result);
+                EnsureOrigin(result, message.RequestUri!);
                 var text = await Wire.ReadBodyAsync(await result.Content.ReadAsStreamAsync(ct), ct);
                 if (result.Content.Headers.ContentType?.MediaType != "application/jose") {
                     string code = "transport_error";
@@ -158,13 +158,15 @@ public sealed class DarkVaultClient : IDisposable {
                 await Task.Delay(200 * (attempt + 1) + Random.Shared.Next(100), ct);
             } catch (HttpRequestException) {
                 throw new DarkVaultException(read ? "unavailable" : "outcome_unknown", 0);
+            } catch (DecoderFallbackException) {
+                throw new DarkVaultException("invalid_response", 0);
             } catch (Exception ex) when (ex is FormatException or InvalidDataException or JsonException or CryptographicException or Jose.JoseException) {
                 throw new DarkVaultException("invalid_response", 0);
             }
         }
     }
-    private void EnsureOrigin(HttpResponseMessage response) {
-        if (response.RequestMessage?.RequestUri?.GetLeftPart(UriPartial.Authority) != endpoint.GetLeftPart(UriPartial.Authority))
+    private static void EnsureOrigin(HttpResponseMessage response, Uri expected) {
+        if (response.RequestMessage?.RequestUri?.AbsoluteUri != expected.AbsoluteUri)
             throw new DarkVaultException("redirect_rejected", (int)response.StatusCode);
     }
 }
