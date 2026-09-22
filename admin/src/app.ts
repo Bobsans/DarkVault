@@ -264,15 +264,8 @@ async function loadTokens(version = routeVersion) {
         row.append(body);
         if (!t.revokedAt) row.append(button('Revoke', async () => {
             if (!confirm('Revoke ' + i.name + '?')) return;
-            const result = await api<{ revoked: boolean }>('token.revoke', { id: i.id });
-            if (!active(version) || !result.revoked) return;
-            const count = Number.parseInt($('token-count').textContent || '0', 10);
-            $('token-count').textContent = String(Math.max(0, count - 1));
-            $('revoked-token-count').textContent = String(Number.parseInt($('revoked-token-count').textContent || '0', 10) + 1);
-            $('token-archive').hidden = false;
-            const badge = heading.querySelector('span'); if (badge) { badge.textContent = 'Revoked'; badge.className = 'badge neutral'; }
-            body.append(node('small', 'Revoked: ' + date(new Date().toISOString())));
-            archive.append(row);
+            await api('token.revoke', { id: i.id });
+            if (active(version)) await loadTokens(version);
         }, 'danger'));
         if (t.revokedAt) body.append(node('small', 'Revoked: ' + date(t.revokedAt)));
         (t.revokedAt ? archive : list).append(row);

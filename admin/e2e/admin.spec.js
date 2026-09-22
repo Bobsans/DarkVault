@@ -126,6 +126,7 @@ test('Admin navigation, audit filters and encrypted CRUD work on desktop and mob
   await nav.getByRole('link', { name: 'Access tokens', exact: true }).click();
   await expect(page.locator('#config-output')).toBeEmpty();
   await expect(page).toHaveURL(/\/admin\/tokens$/);
+  await expect(page.locator('#page-content')).not.toHaveAttribute('aria-busy', 'true');
   await page.getByRole('button', { name: 'New token', exact: true }).click();
   await expect(page.locator('.sidebar')).not.toContainText('Server workspace');
   await expect(page.locator('#token-archive')).toBeHidden();
@@ -232,6 +233,7 @@ test('Admin navigation, audit filters and encrypted CRUD work on desktop and mob
   await page.getByRole('button', { name: 'Close', exact: true }).click();
   await expect(page.locator('#value-text')).toHaveValue('');
   const tokenRow = page.locator('#token-list article').filter({ hasText: 'Payments service' });
+  await expect(page.locator('#token-count')).toHaveText(String(Number(initialTokenCount) + 1));
   page.once('dialog', dialog => dialog.accept()); await tokenRow.getByRole('button', { name: 'Revoke', exact: true }).click();
   await expect(tokenRow).toHaveCount(0);
   await expect(page.locator('#token-count')).toHaveText(initialTokenCount);
