@@ -41,12 +41,23 @@ function pageLimit(value: number): number {
 
 function validateData(operation: string, data: unknown): void {
     if (!data || typeof data !== "object" || Array.isArray(data)) throw new DarkVaultError("invalid_response");
-    const object = data as Record<string, unknown>; const required = (...fields: string[]) => { if (fields.some(field => !(field in object))) throw new DarkVaultError("invalid_response"); };
-    const stringMap = (value: unknown) => { if (!value || typeof value !== "object" || Array.isArray(value) || Object.values(value).some(entry => typeof entry !== "string")) throw new DarkVaultError("invalid_response"); };
+    const object = data as Record<string, unknown>;
     if (operation.endsWith(".delete")) { if (object.deleted !== true) throw new DarkVaultError("invalid_response"); return; }
-    if (operation.endsWith(".list")) { if (!Array.isArray(object.items) || !("nextCursor" in object) || (object.nextCursor !== null && typeof object.nextCursor !== "string")) throw new DarkVaultError("invalid_response"); return; }
+    if (operation.endsWith(".list")) {
+        if (!Array.isArray(object.items) || !("nextCursor" in object) || (object.nextCursor !== null && typeof object.nextCursor !== "string")) throw new DarkVaultError("invalid_response");
+        // Every element must satisfy the single-record schema; a missing field must not reach the caller as undefined.
+        for (const item of object.items) validateRecord(operation, item);
+        return;
+    }
+    validateRecord(operation, data);
+}
+function validateRecord(operation: string, data: unknown): void {
+    if (!data || typeof data !== "object" || Array.isArray(data)) throw new DarkVaultError("invalid_response");
+    const object = data as Record<string, unknown>;
+    const required = (...fields: string[]) => { if (fields.some(field => !(field in object) || object[field] === null || object[field] === undefined)) throw new DarkVaultError("invalid_response"); };
+    const stringMap = (value: unknown) => { if (!value || typeof value !== "object" || Array.isArray(value) || Object.values(value).some(entry => typeof entry !== "string")) throw new DarkVaultError("invalid_response"); };
     if (operation === "bucket.read") { required("bucketId", "revision", "secrets", "types"); stringMap(object.secrets); stringMap(object.types); return; }
-    if (operation === "token.info") { required("id", "name", "scopes", "bucketIds", "allBuckets", "creatableBucketNames", "expiresAt"); return; }
+    if (operation === "token.info") { required("id", "name", "scopes", "bucketIds", "allBuckets", "creatableBucketNames"); if (!("expiresAt" in object)) throw new DarkVaultError("invalid_response"); return; }
     if (operation.startsWith("secret.")) { required("id", "bucketId", "key", "revision", "createdAt", "updatedAt", "type"); if (operation === "secret.read") required("value"); return; }
     required("id", "name", "description", "revision", "createdAt", "updatedAt");
 }

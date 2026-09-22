@@ -52,6 +52,10 @@ func TestResponseAndOperationSchemasRejectMissingFields(t *testing.T) {
 		{"bucket.list", `{"items":[]}`},
 		{"bucket.delete", `{"deleted":false}`},
 		{"bucket.read", `{"bucketId":"id","revision":1,"secrets":{},"types":{"K":null}}`},
+		{"bucket.list", `{"items":[{"name":"b","description":"","revision":1,"createdAt":"2026-01-01T00:00:00Z","updatedAt":"2026-01-01T00:00:00Z"}],"nextCursor":null}`},
+		{"bucket.list", `{"items":[{"id":null,"name":"b","description":"","revision":1,"createdAt":"2026-01-01T00:00:00Z","updatedAt":"2026-01-01T00:00:00Z"}],"nextCursor":null}`},
+		{"secret.list", `{"items":[{"id":"id","bucketId":"bucket","key":"k","revision":1,"createdAt":"2026-01-01T00:00:00Z","updatedAt":"2026-01-01T00:00:00Z"}],"nextCursor":null}`},
+		{"secret.list", `{"items":["not-an-object"],"nextCursor":null}`},
 	} {
 		if err := validateData(test.operation, json.RawMessage(test.data)); err == nil {
 			t.Fatalf("invalid %s data accepted", test.operation)
@@ -62,6 +66,10 @@ func TestResponseAndOperationSchemasRejectMissingFields(t *testing.T) {
 func TestLiveOperations(t *testing.T) {
 	path := os.Getenv("DARKVAULT_ACCEPTANCE")
 	if path == "" {
+		// The verification gate requires the live run; without the flag a local run may still skip it.
+		if os.Getenv("DARKVAULT_ACCEPTANCE_REQUIRED") != "" {
+			t.Fatal("DARKVAULT_ACCEPTANCE_REQUIRED is set without DARKVAULT_ACCEPTANCE")
+		}
 		t.Skip("Set DARKVAULT_ACCEPTANCE to the acceptance host descriptor")
 	}
 	data, err := os.ReadFile(path)

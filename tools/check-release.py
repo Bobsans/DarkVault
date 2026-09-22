@@ -138,6 +138,9 @@ def check(assets: Path, tag: str, commit: str) -> None:
         major = int(version.split(".")[0])
         module = "github.com/Bobsans/DarkVault/clients/go" + (f"/v{major}" if major >= 2 else "")
         assert archive.extractfile("go.mod").read().decode().splitlines()[0] == f"module {module}", "Wrong Go module major"
+        readme = archive.extractfile("README.md").read().decode()
+        assert f"go get {module}@latest" in readme, "Go README install path is not the module major"
+        assert f"`clients/go/v{major}." in readme, "Go README release tag example is not the module major"
 
     for runtime in runtimes:
         extension = "zip" if runtime.startswith("win-") else "tar.gz"

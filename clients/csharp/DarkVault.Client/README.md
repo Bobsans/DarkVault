@@ -101,9 +101,10 @@ Names, keys, values, and descriptions are strings; revisions are `long`, limits
 are `int`, and cursors are nullable strings.
 
 - `Bucket`: `Id`, `Name`, `Description`, `Revision`, `CreatedAt`, `UpdatedAt`.
-- `SecretMetadata`: `Id`, `BucketId`, `Key`, `Revision`, `CreatedAt`, `UpdatedAt`.
+- `SecretMetadata`: `Id`, `BucketId`, `Key`, `Revision`, `CreatedAt`, `UpdatedAt`, `Type`.
 - `Secret`: the same fields plus `Value`. Listing does not return values.
-- `BucketSnapshot`: `BucketId`, `Revision`, `Secrets`.
+- `BucketSnapshot`: `BucketId`, `Revision`, `Secrets`, sparse `Types`
+  (a missing key means `string`).
 - `Page<T>`: `Items`, `NextCursor`.
 - `TokenInfo`: `Id`, `Name`, `Scopes`, `BucketIds`, `AllBuckets`,
   `CreatableBucketNames`, and nullable `ExpiresAt`.

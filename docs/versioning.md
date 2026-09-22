@@ -41,7 +41,8 @@ go -C cli run . --version
 - NuGet: общая версия пакетов, версия зависимости configuration → client, RepositoryCommit.
 - Python: версия wheel/sdist и ссылка Source на точный коммит.
 - TypeScript: версия npm-пакета и `gitHead`.
-- Go: тег `clients/go/v1.2.3` на том же коммите и `release.json` в архиве исходников.
+- Go: тег `clients/go/v2.1.3` (major совпадает с суффиксом module path) на том же
+  коммите и `release.json` в архиве исходников.
 
 Go SDK v2+ требует суффикса `/v2` (либо соответствующего major) в module path
 и обновления импортов; упаковка останавливается, если это не выполнено.

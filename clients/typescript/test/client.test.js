@@ -98,6 +98,38 @@ test('Caches server keys and preserves plaintext error metadata', async () => {
     assert.equal(refreshDiscovery, 2); assert.equal(refreshPosts, 2);
 });
 
+test('Page elements are validated against the single-record schema', async () => {
+    const { generateKeyPair, exportJWK, compactDecrypt } = await import('jose');
+    const pair = await generateKeyPair('ECDH-ES', { crv: 'P-256', extractable: true });
+    const serverKey = {
+        protocolVersion: 1,
+        serverId: '00000000-0000-4000-8000-000000000001',
+        kid: '00000000-0000-4000-8000-000000000002',
+        publicKey: await exportJWK(pair.publicKey),
+        serverTime: new Date().toISOString(),
+        notAfter: new Date(Date.now() + 300000).toISOString(),
+        limits: { maxBodyBytes: 2 * 1024 * 1024, maxPlaintextBytes: 1536 * 1024 }
+    };
+    const complete = { id: 'b', name: 'qa', description: '', revision: 1, createdAt: '2026-01-01T00:00:00Z', updatedAt: '2026-01-01T00:00:00Z' };
+    const page = (items) => new DarkVaultClient('vault.example.com', token, { fetch: async (url, options) => {
+        if (url.endsWith('/crypto/key')) return new Response(JSON.stringify(serverKey), { status: 200, headers: { 'Content-Type': 'application/json' } });
+        const request = JSON.parse(new TextDecoder().decode((await compactDecrypt(options.body, pair.privateKey)).plaintext));
+        const reply = await importJWK(request.replyKey, 'ECDH-ES');
+        const body = await new CompactEncrypt(new TextEncoder().encode(JSON.stringify({
+            v: 1, requestId: request.requestId, serverId: serverKey.serverId, audience: 'data',
+            operation: 'bucket.list', status: 200, data: { items, nextCursor: null }, error: null
+        }))).setProtectedHeader({ alg: 'ECDH-ES', enc: 'A256GCM', typ: 'darkvault-response+jwe', cty: 'application/json', kid: request.requestId }).encrypt(reply);
+        return new Response(body, { status: 200, headers: { 'Content-Type': 'application/jose' } });
+    } }).listBuckets();
+    assert.deepEqual((await page([complete])).items, [complete]);
+    for (const items of [[{ ...complete, id: undefined }], [{ ...complete, revision: null }], ['not-an-object']]) {
+        await assert.rejects(page(items), error => error instanceof DarkVaultError && error.code === 'invalid_response');
+    }
+});
+
+// The verification gate requires the live run; without the flag a local run may still skip it.
+if (process.env.DARKVAULT_ACCEPTANCE_REQUIRED && !process.env.DARKVAULT_ACCEPTANCE) throw new Error('DARKVAULT_ACCEPTANCE_REQUIRED is set without DARKVAULT_ACCEPTANCE');
+
 test('All SDK operations against the .NET HTTPS server', { skip: !process.env.DARKVAULT_ACCEPTANCE }, async () => {
     const descriptor = JSON.parse(await readFile(process.env.DARKVAULT_ACCEPTANCE, 'utf8'));
     const client = new DarkVaultClient(descriptor.url, await readFile(descriptor.tokenFile, 'utf8'));

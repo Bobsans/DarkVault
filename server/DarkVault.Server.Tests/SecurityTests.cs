@@ -237,6 +237,48 @@ public sealed class SecurityTests {
         using var response = await host.Http.PostAsync(host.Url + "/admin/login", body);
         Assert.That((int)response.StatusCode, Is.EqualTo(413));
     }
+
+    [Test]
+    public async Task ProxiedHostIsRejectedWithoutACanonicalPublicOrigin() {
+        const string password = "origin-test-password-only";
+        const string proxied = "vault.example.com";
+        foreach (var configured in new[] { null, "https://" + proxied }) {
+            string[] arguments = configured is null ? ["--Security:RateLimits:Login=30"] : ["--Security:RateLimits:Login=30", "--DARKVAULT_PUBLIC_ORIGIN=" + configured];
+            await using var host = await Host.Start(arguments);
+            host.Store.SetPassword(password);
+            // A misconfigured proxy can forward any Host; only a canonical origin may define the WebAuthn origin.
+            host.Http.DefaultRequestHeaders.Host = proxied;
+            host.Http.DefaultRequestHeaders.Add("Origin", "https://" + proxied);
+            var session = await host.Http.GetFromJsonAsync<JsonElement>(host.Url + "/admin/api/v1/session");
+            host.Http.DefaultRequestHeaders.Add("X-CSRF-Token", session.GetProperty("csrfToken").GetString());
+            using var login = await host.Http.PostAsJsonAsync(host.Url + "/admin/login", new { username = "admin", password });
+            if (configured is null) {
+                Assert.That(login.StatusCode, Is.EqualTo(HttpStatusCode.BadRequest));
+                var error = await login.Content.ReadFromJsonAsync<JsonElement>();
+                Assert.That(error.GetProperty("error").GetProperty("code").GetString(), Is.EqualTo("invalid_origin"));
+            } else {
+                Assert.That(login.StatusCode, Is.EqualTo(HttpStatusCode.OK));
+            }
+        }
+    }
+
+    [Test, NonParallelizable]
+    public async Task WrappingKeyIsRefusedInsideTheDataDirectory() {
+        var directory = Path.Combine(Path.GetTempPath(), "dv-wrapping-command-" + Guid.NewGuid()); Directory.CreateDirectory(directory);
+        var previous = Environment.GetEnvironmentVariable("DARKVAULT_DATA");
+        Environment.SetEnvironmentVariable("DARKVAULT_DATA", directory);
+        var outside = Path.Combine(Path.GetTempPath(), "dv-wrapping-command-" + Guid.NewGuid() + ".key");
+        try {
+            var inside = Path.Combine(directory, "wrapping.key");
+            Assert.That(await ServerCommands.RunAsync(["create-wrapping-key", inside]), Is.EqualTo(1));
+            Assert.That(File.Exists(inside), Is.False);
+            Assert.That(await ServerCommands.RunAsync(["create-wrapping-key", outside]), Is.EqualTo(0));
+            Assert.That(File.Exists(outside), Is.True);
+        } finally {
+            Environment.SetEnvironmentVariable("DARKVAULT_DATA", previous);
+            File.Delete(outside); System.IO.Directory.Delete(directory, true);
+        }
+    }
     private sealed class Host : IAsyncDisposable {
         private readonly string directory;
         public string Directory => directory;

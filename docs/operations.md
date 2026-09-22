@@ -56,6 +56,9 @@ CLI bootstrap требует локальный интерактивный те�
 
 Релизный Native AOT-образ публикуется в Docker Hub для Linux `amd64` и `arm64`.
 Он запускается от non-root пользователя и хранит только рабочие данные в `/data`.
+Путь образа собирается workflow из secret `DOCKERHUB_USERNAME`:
+`docker.io/<DOCKERHUB_USERNAME>/darkvault`. В командах ниже используется namespace
+этого репозитория; для форка или своего аккаунта подставьте собственный.
 
 Создайте том и выполните интерактивный bootstrap:
 
@@ -88,6 +91,8 @@ Caddy получает и обновляет сертификат домена. 
 DarkVault слушает `http://127.0.0.1:8866`; внешний plaintext HTTP запрещён приложением.
 Для этой схемы явно задайте серверу `DARKVAULT_TRUSTED_PROXIES=127.0.0.1,::1`:
 по умолчанию forwarded-заголовки не принимаются. При прямом HTTPS переменная не нужна.
+Задайте также `DARKVAULT_PUBLIC_ORIGIN=https://vault.example.com`: без него passkey-операции
+принимают только loopback-хост и за proxy отвечают `invalid_origin`.
 Проверка сертификатов SDK/CLI всегда включена, собственные CA-файлы не нужны.
 Условия получения сертификата: [документация Automatic HTTPS](https://caddyserver.com/docs/automatic-https).
 

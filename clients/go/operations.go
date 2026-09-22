@@ -67,6 +67,14 @@ func requiredObject(data json.RawMessage) (map[string]json.RawMessage, error) {
 }
 func requiredFields(object map[string]json.RawMessage, names ...string) error {
 	for _, name := range names {
+		if raw, ok := object[name]; !ok || string(raw) == "null" {
+			return errors.New("invalid response data")
+		}
+	}
+	return nil
+}
+func presentFields(object map[string]json.RawMessage, names ...string) error {
+	for _, name := range names {
 		if _, ok := object[name]; !ok {
 			return errors.New("invalid response data")
 		}
@@ -108,6 +116,23 @@ func validateData(operation string, data json.RawMessage) error {
 		if !ok || (string(raw) != "null" && func() bool { var cursor string; return json.Unmarshal(raw, &cursor) != nil }()) {
 			return errors.New("invalid response data")
 		}
+		// Every element must satisfy the single-record schema; a missing field must not become a zero value.
+		for _, item := range items {
+			element, err := requiredObject(item)
+			if err != nil {
+				return err
+			}
+			if err = validateRecord(operation, element); err != nil {
+				return err
+			}
+		}
+	default:
+		return validateRecord(operation, object)
+	}
+	return nil
+}
+func validateRecord(operation string, object map[string]json.RawMessage) error {
+	switch {
 	case operation == "bucket.read":
 		if err := requiredFields(object, "bucketId", "revision", "secrets", "types"); err != nil {
 			return err
@@ -119,7 +144,10 @@ func validateData(operation string, data json.RawMessage) error {
 			return err
 		}
 	case operation == "token.info":
-		return requiredFields(object, "id", "name", "scopes", "bucketIds", "allBuckets", "creatableBucketNames", "expiresAt")
+		if err := requiredFields(object, "id", "name", "scopes", "bucketIds", "allBuckets", "creatableBucketNames"); err != nil {
+			return err
+		}
+		return presentFields(object, "expiresAt")
 	case strings.HasPrefix(operation, "secret."):
 		fields := []string{"id", "bucketId", "key", "revision", "createdAt", "updatedAt", "type"}
 		if operation == "secret.read" {

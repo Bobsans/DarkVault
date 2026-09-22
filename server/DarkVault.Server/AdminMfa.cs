@@ -29,8 +29,13 @@ public sealed class AdminMfa(TimeProvider clock) {
 
     public static string PublicOrigin(HttpContext context) {
         var configured = context.RequestServices.GetRequiredService<IConfiguration>()["DARKVAULT_PUBLIC_ORIGIN"];
-        return configured is { Length: > 0 } ? ValidateOrigin(configured).GetLeftPart(UriPartial.Authority) : "https://" + context.Request.Host;
+        if (configured is { Length: > 0 }) return ValidateOrigin(configured).GetLeftPart(UriPartial.Authority);
+        // Without a canonical origin the request Host defines the WebAuthn origin, so only a loopback host is trusted.
+        if (!IsLoopback(context.Request.Host.Host)) throw new VaultFault(400, "invalid_origin");
+        return "https://" + context.Request.Host;
     }
+    private static bool IsLoopback(string host) => string.Equals(host, "localhost", StringComparison.OrdinalIgnoreCase) ||
+        (System.Net.IPAddress.TryParse(host.Trim('[', ']'), out var address) && System.Net.IPAddress.IsLoopback(address));
     private static Uri ValidateOrigin(string value) => Uri.TryCreate(value, UriKind.Absolute, out var uri) && uri.Scheme == "https" &&
         uri.UserInfo.Length == 0 && uri.AbsolutePath == "/" && uri.Query.Length == 0 && uri.Fragment.Length == 0 ? uri : throw new InvalidOperationException("DARKVAULT_PUBLIC_ORIGIN must be an HTTPS origin.");
 

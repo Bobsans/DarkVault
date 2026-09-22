@@ -158,19 +158,20 @@ Chocolatey и Homebrew в этот workflow не входит.
 
 ## Docker Hub
 
-Релизный образ сервера публикуется в публичный репозиторий
-[`bobsans/darkvault`](https://hub.docker.com/r/bobsans/darkvault) после успешной
-сборки и проверки GitHub Release.
+Релизный образ сервера публикуется после успешной сборки и проверки GitHub Release
+в репозиторий `docker.io/<DOCKERHUB_USERNAME>/darkvault`; для этого репозитория —
+[`bobsans/darkvault`](https://hub.docker.com/r/bobsans/darkvault).
 
 Workflow использует secrets `DOCKERHUB_TOKEN` (Docker Hub access token)
-и `DOCKERHUB_USERNAME` (имя пользователя Docker Hub).
+и `DOCKERHUB_USERNAME` (имя пользователя Docker Hub); из второго строится имя образа,
+поэтому смена secret меняет и целевой репозиторий образа.
 Постоянный пароль в workflow не используется.
 
 Публикуются только Linux-образы `amd64` и `arm64` с тегами:
 
 ```text
-docker.io/bobsans/darkvault:2.1.0
-docker.io/bobsans/darkvault:sha-<short-commit>
+docker.io/<DOCKERHUB_USERNAME>/darkvault:2.1.0
+docker.io/<DOCKERHUB_USERNAME>/darkvault:sha-<short-commit>
 ```
 
 Публикация контейнера — отдельная job после `release`; при её сбое повторите только

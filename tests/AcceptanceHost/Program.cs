@@ -12,7 +12,14 @@ if (args.Skip(1).SequenceEqual(["--check"])) {
     using var pinned = X509CertificateLoader.LoadCertificateFromFile(info.GetProperty("ca").GetString()!);
     using var http = new HttpClient(new HttpClientHandler {
         AllowAutoRedirect = false,
-        ServerCertificateCustomValidationCallback = (_, cert, _, _) => cert?.Thumbprint == pinned.Thumbprint
+        // The test CA replaces the OS trust store; hostname and chain are still verified.
+        ServerCertificateCustomValidationCallback = (_, cert, chain, errors) => {
+            if (cert is null || chain is null || (errors & System.Net.Security.SslPolicyErrors.RemoteCertificateNameMismatch) != 0) return false;
+            chain.ChainPolicy.TrustMode = X509ChainTrustMode.CustomRootTrust;
+            chain.ChainPolicy.RevocationMode = X509RevocationMode.NoCheck;
+            chain.ChainPolicy.CustomTrustStore.Add(pinned);
+            return chain.Build(cert);
+        }
     });
     using var client = new DarkVaultClient(info.GetProperty("url").GetString()!, (await File.ReadAllTextAsync(info.GetProperty("tokenFile").GetString()!)).Trim(), http);
     var name = "csharp_" + Guid.NewGuid().ToString("N");
@@ -29,13 +36,26 @@ if (args.Skip(1).SequenceEqual(["--check"])) {
 }
 var state = Path.Combine(root, ".local", "acceptance-" + Guid.NewGuid().ToString("N"));
 ServerCommands.SecureDirectory(state);
+// A test CA issues the server certificate so clients verify a real chain and hostname, not a pinned leaf.
+var from = DateTimeOffset.UtcNow.AddMinutes(-1); var until = DateTimeOffset.UtcNow.AddDays(1);
+using var authorityKey = RSA.Create(2048);
+var authorityRequest = new CertificateRequest("CN=DarkVault acceptance CA", authorityKey, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
+authorityRequest.CertificateExtensions.Add(new X509BasicConstraintsExtension(true, true, 0, true));
+authorityRequest.CertificateExtensions.Add(new X509KeyUsageExtension(X509KeyUsageFlags.KeyCertSign | X509KeyUsageFlags.CrlSign, true));
+authorityRequest.CertificateExtensions.Add(new X509SubjectKeyIdentifierExtension(authorityRequest.PublicKey, false));
+using var authority = authorityRequest.CreateSelfSigned(from, until);
 using var rsa = RSA.Create(2048);
 var certificateRequest = new CertificateRequest("CN=localhost", rsa, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
 var san = new SubjectAlternativeNameBuilder(); san.AddDnsName("localhost"); san.AddIpAddress(System.Net.IPAddress.Loopback);
 certificateRequest.CertificateExtensions.Add(san.Build());
-using var certificate = certificateRequest.CreateSelfSigned(DateTimeOffset.UtcNow.AddMinutes(-1), DateTimeOffset.UtcNow.AddDays(1));
+certificateRequest.CertificateExtensions.Add(new X509BasicConstraintsExtension(false, false, 0, true));
+certificateRequest.CertificateExtensions.Add(new X509KeyUsageExtension(X509KeyUsageFlags.DigitalSignature | X509KeyUsageFlags.KeyEncipherment, true));
+certificateRequest.CertificateExtensions.Add(new X509EnhancedKeyUsageExtension([new System.Security.Cryptography.Oid("1.3.6.1.5.5.7.3.1")], false));
+certificateRequest.CertificateExtensions.Add(new X509SubjectKeyIdentifierExtension(certificateRequest.PublicKey, false));
+using var leaf = certificateRequest.Create(authority, from, until, RandomNumberGenerator.GetBytes(16));
+using var certificate = leaf.CopyWithPrivateKey(rsa);
 var pfx = Path.Combine(state, "server.pfx"); await File.WriteAllBytesAsync(pfx, certificate.Export(X509ContentType.Pfx));
-var ca = Path.Combine(state, "ca.crt"); await File.WriteAllTextAsync(ca, certificate.ExportCertificatePem());
+var ca = Path.Combine(state, "ca.crt"); await File.WriteAllTextAsync(ca, authority.ExportCertificatePem());
 var ring = new KeyRing(Path.Combine(state, "keyring.json"), true);
 using var store = new VaultStore(Path.Combine(state, "vault.db"), ring); store.SetPassword("acceptance-test-password-only");
 var admin = new VaultStore.Principal("acceptance", true);

@@ -295,8 +295,8 @@ public sealed partial class VaultStore : IDisposable {
         if (op == "bucket.get") { Fields(args, "bucket"); Require(p, "bucket:read"); return bucket; }
         if (op == "bucket.read") {
             Fields(args, "bucket"); Require(p, "bucket:read", "secret:read", "secret:list");
-            return new BucketSnapshot(bucket.Id, bucket.Revision, Values(bucket.Id),
-                Types(bucket.Id));
+            var snapshot = Entries(bucket.Id);
+            return new BucketSnapshot(bucket.Id, bucket.Revision, Values(snapshot), Types(snapshot));
         }
         if (op == "bucket.update") {
             var hasName = args.TryGetProperty("name", out _);
@@ -347,8 +347,10 @@ public sealed partial class VaultStore : IDisposable {
         if (Encoding.UTF8.GetByteCount(value) > 65536) throw new VaultFault(413, "payload_too_large");
         var type = args.TryGetProperty("type", out _) ? Text(args, "type", 16) : "string";
         try { value = SecretValues.Normalize(value, type); } catch (ArgumentException) { throw new VaultFault(400, "invalid_secret_type"); }
-        var values = Values(bucket.Id); values[key] = value;
-        var types = Types(bucket.Id); if (type == "string") types.Remove(key); else types[key] = type;
+        // ponytail: one decrypt pass per write to enforce the snapshot bounds; store plaintext sizes if writes to large buckets become hot.
+        var stored = Entries(bucket.Id);
+        var values = Values(stored); values[key] = value;
+        var types = Types(stored); if (type == "string") types.Remove(key); else types[key] = type;
         if (values.Count > 4096 || Encoding.UTF8.GetByteCount(ServerJson.Serialize(new BucketSnapshot(bucket.Id, bucket.Revision, values, types))) > 1024 * 1024) throw new VaultFault(413, "payload_too_large");
         var time = DateTimeOffset.UtcNow;
         var meta = new SecretMetadata(old?.Metadata.Id ?? Guid.NewGuid().ToString(), bucket.Id, key, Revision(), old?.Metadata.CreatedAt ?? time, time, type);
@@ -368,10 +370,11 @@ public sealed partial class VaultStore : IDisposable {
         throw new CryptographicException("Unable to allocate a unique nonce.");
     }
     private void SaveBucket(Bucket b) => Execute("UPDATE buckets SET json=$p0, name=$p2 WHERE id=$p1", ServerJson.Serialize(b), b.Id, b.Name);
-    private Dictionary<string, string?> Values(string bucket) => Many<StoredSecret>("SELECT json FROM entries WHERE bucket=$p0", bucket)
-        .ToDictionary(s => s.Metadata.Key, s => (string?)ring.Decrypt(s.Value, s.Metadata), StringComparer.Ordinal);
-    private Dictionary<string, string> Types(string bucket) => Many<StoredSecret>("SELECT json FROM entries WHERE bucket=$p0", bucket)
-        .Where(s => s.Metadata.Type != "string").ToDictionary(s => s.Metadata.Key, s => s.Metadata.Type, StringComparer.Ordinal);
+    private List<StoredSecret> Entries(string bucket) => Many<StoredSecret>("SELECT json FROM entries WHERE bucket=$p0", bucket);
+    private Dictionary<string, string?> Values(List<StoredSecret> entries) =>
+        entries.ToDictionary(s => s.Metadata.Key, s => (string?)ring.Decrypt(s.Value, s.Metadata), StringComparer.Ordinal);
+    private static Dictionary<string, string> Types(List<StoredSecret> entries) =>
+        entries.Where(s => s.Metadata.Type != "string").ToDictionary(s => s.Metadata.Key, s => s.Metadata.Type, StringComparer.Ordinal);
     private object AdminCommand(Principal p, string op, JsonElement args) {
         if (!p.IsAdmin) throw new VaultFault(403, "forbidden");
         if (op == "token.create") {

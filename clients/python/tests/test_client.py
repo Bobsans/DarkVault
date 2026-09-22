@@ -260,6 +260,13 @@ class ClientTests(unittest.TestCase):
                 response.read1.assert_not_called()
 
 
+class LiveGateTests(unittest.TestCase):
+    def test_live_tests_are_not_skipped_in_the_verification_gate(self):
+        # The verification gate requires the live run; without the flag a local run may still skip it.
+        if os.environ.get("DARKVAULT_ACCEPTANCE_REQUIRED") and not os.environ.get("DARKVAULT_ACCEPTANCE"):
+            self.fail("DARKVAULT_ACCEPTANCE_REQUIRED is set without DARKVAULT_ACCEPTANCE")
+
+
 @unittest.skipUnless(os.environ.get("DARKVAULT_ACCEPTANCE"), "Requires the local acceptance server")
 class LiveTests(unittest.TestCase):
     def test_all_data_operations_against_dotnet(self):

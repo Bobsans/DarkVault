@@ -5,6 +5,8 @@ pwsh tools/verify.ps1
 ```
 
 Требования: .NET 10 SDK, Go SDK 1.25+, CLI Go 1.26+, Python 3.11+, Node.js 22+, pnpm 11 и PowerShell 7.
+CI использует точно закреплённые версии toolchain и digest базового образа
+(`.github/workflows/release.yml`, `deploy/Dockerfile`); локально допустимы совместимые версии.
 Для уже установленных frontend-зависимостей можно передать `-SkipInstall`;
 параметры `-Node`, `-Pnpm` и `-Python` позволяют указать путь к инструментам.
 Для сборки Python создаётся `artifacts/python-env`, а wheel устанавливается
@@ -30,8 +32,13 @@ Go-тесты и vet, Python-тесты, JavaScript-тесты протокол�
 | Go CLI             | Команды через общий Go SDK, безопасное окружение дочернего процесса                                            |
 | Конфиг CLI         | Set/get/unset, маскировка токена, приоритеты, приватные права файла, запуск без параметров подключения         |
 | Браузер            | Вход, создание бакета, изменение секрета, выдача/отзыв токена, выход                                           |
+| TLS стенда         | Цепочка до тестового CA, проверка hostname и отказ без CA (`admin/tls.test.js`)                                |
 | SPA                | Строгая проверка TypeScript, упаковка HTML/CSS/JS с сервером, security headers и 404 для неизвестных API-путей |
 | Межъязыковой обмен | Общий публичный fixture и обмен .NET ↔ Go / Python / браузер                                                   |
+
+Live-тесты Go, Python, TypeScript и CLI включаются переменной `DARKVAULT_ACCEPTANCE`
+с путём к descriptor стенда. Скрипт дополнительно задаёт `DARKVAULT_ACCEPTANCE_REQUIRED=1`:
+при отсутствии descriptor они падают, а не пропускаются молча.
 
 `tests/fixtures/jwe.json` содержит исключительно публичные тестовые ключи.
 Тестовый сертификат не добавляется в системное хранилище доверия. Сервер стенда

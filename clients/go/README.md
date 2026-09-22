@@ -17,7 +17,7 @@ go get github.com/Bobsans/DarkVault/clients/go/v2@latest
 ```
 
 Pin a published version for reproducible builds. Releases use module tags such as
-`clients/go/v1.0.0`; consumers request `@v1.0.0`.
+`clients/go/v2.0.0`; consumers request `@v2.0.0`.
 
 ## Quick start
 
@@ -117,9 +117,10 @@ limits are `int`, and `recursive` is `bool`. Go has no optional method arguments
 pass `""`, `100`, `0`, or `false` explicitly where appropriate.
 
 - `Bucket`: `ID`, `Name`, `Description`, `Revision`, `CreatedAt`, `UpdatedAt`.
-- `SecretMetadata`: `ID`, `BucketID`, `Key`, `Revision`, `CreatedAt`, `UpdatedAt`.
+- `SecretMetadata`: `ID`, `BucketID`, `Key`, `Revision`, `CreatedAt`, `UpdatedAt`, `Type`.
 - `Secret`: embedded `SecretMetadata` plus `Value`.
-- `BucketSnapshot`: `BucketID`, `Revision`, `Secrets`.
+- `BucketSnapshot`: `BucketID`, `Revision`, `Secrets`, sparse `Types`
+  (a missing key means `string`).
 - `Page[T]`: `Items []T`, `NextCursor *string`.
 - `TokenInfo`: `ID`, `Name`, `Scopes`, `BucketIDs`, `AllBuckets`,
   `CreatableBucketNames`, `ExpiresAt`.

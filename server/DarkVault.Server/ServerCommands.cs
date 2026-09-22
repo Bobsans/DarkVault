@@ -24,7 +24,7 @@ public static class ServerCommands {
                     DARKVAULT_DATA: private directory (default: ./data)
                     ASPNETCORE_URLS: listen URL (default: http://127.0.0.1:8866 behind trusted HTTPS proxy)
                     DARKVAULT_TRUSTED_PROXIES: comma-separated IPs (default: no trusted proxies)
-                    DARKVAULT_PUBLIC_ORIGIN: canonical HTTPS origin for WebAuthn (optional)
+                    DARKVAULT_PUBLIC_ORIGIN: canonical HTTPS origin for WebAuthn (required unless the host is loopback)
                     DARKVAULT_KEYRING_KEY_FILE: private wrapping-key file outside DARKVAULT_DATA
                     bootstrap/reset-password read a password without echo from the local terminal.
                     """); return 0;
@@ -32,6 +32,8 @@ public static class ServerCommands {
             var command = args.FirstOrDefault() ?? "serve";
             if (command == "create-wrapping-key") {
                 if (args.Length != 2) throw new ArgumentException("Specify a new private wrapping-key file outside the data directory.");
+                if (InsideDataDirectory(Path.GetFullPath(Environment.GetEnvironmentVariable("DARKVAULT_DATA") ?? "data"), args[1]))
+                    throw new InvalidOperationException("Keep the wrapping key outside the vault data directory.");
                 var generated = RandomNumberGenerator.GetBytes(32);
                 try { KeyRing.SavePrivate(args[1], Convert.ToBase64String(generated), overwrite: false); } finally { CryptographicOperations.ZeroMemory(generated); }
                 Console.WriteLine("Wrapping key created. Keep a separate secure backup; losing it loses access to the vault."); return 0;
@@ -43,8 +45,7 @@ public static class ServerCommands {
             var wrappingFile = Environment.GetEnvironmentVariable("DARKVAULT_KEYRING_KEY_FILE");
             byte[]? wrappingKey = null;
             if (!string.IsNullOrEmpty(wrappingFile)) {
-                var relative = Path.GetRelativePath(directory, Path.GetFullPath(wrappingFile));
-                if (!Path.IsPathRooted(relative) && relative != ".." && !relative.StartsWith(".." + Path.DirectorySeparatorChar)) throw new InvalidOperationException("Keep the wrapping key outside the vault data directory.");
+                if (InsideDataDirectory(directory, wrappingFile)) throw new InvalidOperationException("Keep the wrapping key outside the vault data directory.");
                 if (new FileInfo(wrappingFile).Length > 1024) throw new InvalidOperationException("Invalid wrapping-key file.");
                 wrappingKey = Convert.FromBase64String(File.ReadAllText(wrappingFile).Trim());
             }
@@ -82,6 +83,10 @@ public static class ServerCommands {
             // Never print input values or exception details that may contain credentials.
             Console.Error.WriteLine($"DarkVault failed ({ex.GetType().Name}). Check configuration, permissions and --help."); return 1;
         }
+    }
+    public static bool InsideDataDirectory(string directory, string file) {
+        var relative = Path.GetRelativePath(directory, Path.GetFullPath(file));
+        return !Path.IsPathRooted(relative) && relative != ".." && !relative.StartsWith(".." + Path.DirectorySeparatorChar);
     }
     public static void SecureDirectory(string path) {
         path = Path.GetFullPath(path);

@@ -36,6 +36,10 @@ func TestEnvironment(t *testing.T) {
 func TestLiveCLI(t *testing.T) {
 	path := os.Getenv("DARKVAULT_ACCEPTANCE")
 	if path == "" {
+		// The verification gate requires the live run; without the flag a local run may still skip it.
+		if os.Getenv("DARKVAULT_ACCEPTANCE_REQUIRED") != "" {
+			t.Fatal("DARKVAULT_ACCEPTANCE_REQUIRED is set without DARKVAULT_ACCEPTANCE")
+		}
 		t.Skip("Set DARKVAULT_ACCEPTANCE to the acceptance host descriptor")
 	}
 	cleanEnvironment(t)

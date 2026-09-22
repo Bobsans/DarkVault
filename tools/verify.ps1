@@ -28,7 +28,7 @@ if ($NativeAot) {
 }
 $artifacts = Join-Path $root 'artifacts'
 New-Item -ItemType Directory -Force -Path $artifacts | Out-Null
-$oldAcceptance = $env:DARKVAULT_ACCEPTANCE
+$oldAcceptance, $oldAcceptanceRequired = $env:DARKVAULT_ACCEPTANCE, $env:DARKVAULT_ACCEPTANCE_REQUIRED
 $oldData, $oldUrls, $oldCertificate = $env:DARKVAULT_DATA, $env:ASPNETCORE_URLS, $env:Kestrel__Certificates__Default__Path
 $oldIpQuota, $oldPrincipalQuota = $env:Security__RateLimits__Ip, $env:Security__RateLimits__Principal
 $hostProcess = $null
@@ -125,13 +125,16 @@ try {
         Start-Sleep -Milliseconds 250
     }
     if (!$ready) { throw 'Acceptance host did not become ready.' }
+    # Live SDK tests must run against the started host; a missing descriptor fails instead of skipping silently.
     $env:DARKVAULT_ACCEPTANCE = $descriptor
+    $env:DARKVAULT_ACCEPTANCE_REQUIRED = '1'
     if ($NativeAot) { dotnet tests/AcceptanceHost/bin/Release/net10.0/AcceptanceHost.dll $root --check }
     $previousCa = $env:NODE_EXTRA_CA_CERTS
     try {
         $env:NODE_EXTRA_CA_CERTS = (Get-Content -LiteralPath $descriptor -Raw | ConvertFrom-Json).ca
         & $Node --test clients/typescript/test/client.test.js
     } finally { $env:NODE_EXTRA_CA_CERTS = $previousCa }
+    & $Node --test admin/tls.test.js
     Push-Location clients/go
     try { go test -count=1 ./... } finally { Pop-Location }
     Push-Location cli
@@ -174,7 +177,7 @@ try {
         Remove-Item -LiteralPath $statePath -Recurse -Force
         Remove-Item -LiteralPath $descriptor -Force
     }
-    $env:DARKVAULT_ACCEPTANCE = $oldAcceptance
+    $env:DARKVAULT_ACCEPTANCE, $env:DARKVAULT_ACCEPTANCE_REQUIRED = $oldAcceptance, $oldAcceptanceRequired
     $env:DARKVAULT_DATA, $env:ASPNETCORE_URLS, $env:Kestrel__Certificates__Default__Path = $oldData, $oldUrls, $oldCertificate
     $env:Security__RateLimits__Ip, $env:Security__RateLimits__Principal = $oldIpQuota, $oldPrincipalQuota
     Pop-Location

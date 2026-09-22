@@ -96,7 +96,7 @@ Scopes do not replace bucket grants.
 | `get_bucket(bucket)` | Bucket metadata |
 | `list_buckets(*, cursor=None, limit=100)` | Page |
 | `read_bucket(bucket)` | `dict[str, str]` |
-| `read_bucket_snapshot(bucket)` | `bucketId`, `revision`, `secrets` |
+| `read_bucket_snapshot(bucket)` | `bucketId`, `revision`, `secrets`, `types` |
 | `update_bucket(bucket, description, expected_revision)` | Bucket metadata |
 | `delete_bucket(bucket, expected_revision, *, recursive=False)` | `None` |
 | `add_secret(bucket, key, value)` | Secret metadata |
@@ -117,6 +117,8 @@ Metadata is returned as dictionaries with camelCase keys:
 
 - Bucket: `id`, `name`, `description`, `revision`, `createdAt`, `updatedAt`.
 - Secret metadata: `id`, `bucketId`, `key`, `revision`, `createdAt`, `updatedAt`, `type`.
+- Bucket snapshot: `bucketId`, `revision`, `secrets`, sparse `types`
+  (a missing key means `string`).
 - Page: `items`, `nextCursor`.
 - Token: `id`, `name`, `scopes`, `bucketIds`, `allBuckets`,
   `creatableBucketNames`, `expiresAt`.
