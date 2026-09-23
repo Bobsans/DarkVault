@@ -32,6 +32,7 @@ New-Item -ItemType Directory -Force -Path $artifacts | Out-Null
 $oldAcceptance, $oldAcceptanceRequired = $env:DARKVAULT_ACCEPTANCE, $env:DARKVAULT_ACCEPTANCE_REQUIRED
 $oldData, $oldUrls, $oldCertificate = $env:DARKVAULT_DATA, $env:ASPNETCORE_URLS, $env:Kestrel__Certificates__Default__Path
 $oldIpQuota, $oldPrincipalQuota = $env:Security__RateLimits__Ip, $env:Security__RateLimits__Principal
+$oldClangModuleCache = $env:CLANG_MODULE_CACHE_PATH
 $hostProcess = $null
 $started = $null
 $descriptor = Join-Path $root '.local/acceptance.json'
@@ -94,6 +95,12 @@ try {
         $nativeServer = Join-Path $nativeOutput $(if ($IsWindows) { 'DarkVault.Server.exe' } else { 'DarkVault.Server' })
         & $nativeServer --version
         $aotSmokeOutput = Join-Path $artifacts "aot-smoke/$runtime"
+        # The macOS linker's shared clang module cache was missing entries on a second Native AOT
+        # link in one job; give this link a fresh private cache.
+        if ($IsMacOS) {
+            $env:CLANG_MODULE_CACHE_PATH = Join-Path $artifacts "clang-module-cache/aot-smoke-$runtime"
+            if (Test-Path -LiteralPath $env:CLANG_MODULE_CACHE_PATH) { Remove-Item -LiteralPath $env:CLANG_MODULE_CACHE_PATH -Recurse -Force }
+        }
         dotnet publish tests/AotSmoke/AotSmoke.csproj -c Release -r $runtime -o $aotSmokeOutput --disable-build-servers -warnaserror
         $aotSmoke = Join-Path $aotSmokeOutput $(if ($IsWindows) { 'AotSmoke.exe' } else { 'AotSmoke' })
     }
@@ -188,5 +195,6 @@ try {
     $env:DARKVAULT_ACCEPTANCE, $env:DARKVAULT_ACCEPTANCE_REQUIRED = $oldAcceptance, $oldAcceptanceRequired
     $env:DARKVAULT_DATA, $env:ASPNETCORE_URLS, $env:Kestrel__Certificates__Default__Path = $oldData, $oldUrls, $oldCertificate
     $env:Security__RateLimits__Ip, $env:Security__RateLimits__Principal = $oldIpQuota, $oldPrincipalQuota
+    $env:CLANG_MODULE_CACHE_PATH = $oldClangModuleCache
     Pop-Location
 }

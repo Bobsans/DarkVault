@@ -52,6 +52,8 @@ certificateRequest.CertificateExtensions.Add(new X509BasicConstraintsExtension(f
 certificateRequest.CertificateExtensions.Add(new X509KeyUsageExtension(X509KeyUsageFlags.DigitalSignature | X509KeyUsageFlags.KeyEncipherment, true));
 certificateRequest.CertificateExtensions.Add(new X509EnhancedKeyUsageExtension([new System.Security.Cryptography.Oid("1.3.6.1.5.5.7.3.1")], false));
 certificateRequest.CertificateExtensions.Add(new X509SubjectKeyIdentifierExtension(certificateRequest.PublicKey, false));
+// Python 3.13+ verifies with VERIFY_X509_STRICT, which requires the issuer's key identifier.
+certificateRequest.CertificateExtensions.Add(X509AuthorityKeyIdentifierExtension.CreateFromCertificate(authority, includeKeyIdentifier: true, includeIssuerAndSerial: false));
 using var leaf = certificateRequest.Create(authority, from, until, RandomNumberGenerator.GetBytes(16));
 using var certificate = leaf.CopyWithPrivateKey(rsa);
 var pfx = Path.Combine(state, "server.pfx"); await File.WriteAllBytesAsync(pfx, certificate.Export(X509ContentType.Pfx));
