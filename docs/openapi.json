@@ -119,6 +119,14 @@
                   "$ref": "#/components/schemas/JweCompact"
                 }
               }
+            },
+            "headers": {
+              "X-Request-Id": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Request correlation ID; matches audit traceId."
+              }
             }
           },
           "201": {
@@ -128,6 +136,14 @@
                 "schema": {
                   "$ref": "#/components/schemas/JweCompact"
                 }
+              }
+            },
+            "headers": {
+              "X-Request-Id": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Request correlation ID; matches audit traceId."
               }
             }
           },
@@ -153,6 +169,14 @@
                   "additionalProperties": false
                 }
               }
+            },
+            "headers": {
+              "X-Request-Id": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Request correlation ID; matches audit traceId."
+              }
             }
           },
           "429": {
@@ -164,6 +188,12 @@
                   "minimum": 1
                 },
                 "description": "Seconds before retrying; never blindly retry mutations."
+              },
+              "X-Request-Id": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Request correlation ID; matches audit traceId."
               }
             }
           }
@@ -302,6 +332,14 @@
                   "$ref": "#/components/schemas/JweCompact"
                 }
               }
+            },
+            "headers": {
+              "X-Request-Id": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Request correlation ID; matches audit traceId."
+              }
             }
           },
           "201": {
@@ -311,6 +349,14 @@
                 "schema": {
                   "$ref": "#/components/schemas/JweCompact"
                 }
+              }
+            },
+            "headers": {
+              "X-Request-Id": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Request correlation ID; matches audit traceId."
               }
             }
           },
@@ -336,6 +382,14 @@
                   "additionalProperties": false
                 }
               }
+            },
+            "headers": {
+              "X-Request-Id": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Request correlation ID; matches audit traceId."
+              }
             }
           },
           "429": {
@@ -347,6 +401,12 @@
                   "minimum": 1
                 },
                 "description": "Seconds before retrying; never blindly retry mutations."
+              },
+              "X-Request-Id": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Request correlation ID; matches audit traceId."
               }
             }
           }
@@ -365,6 +425,14 @@
                   "$ref": "#/components/schemas/CryptoKey"
                 }
               }
+            },
+            "headers": {
+              "X-Request-Id": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Request correlation ID; matches audit traceId."
+              }
             }
           },
           "429": {
@@ -376,6 +444,12 @@
                   "minimum": 1
                 },
                 "description": "Seconds before retrying; never blindly retry mutations."
+              },
+              "X-Request-Id": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Request correlation ID; matches audit traceId."
               }
             }
           }
@@ -398,14 +472,33 @@
                     },
                     "csrfToken": {
                       "type": "string"
+                    },
+                    "serverVersion": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
                     }
                   },
                   "required": [
                     "authenticated",
-                    "csrfToken"
+                    "csrfToken",
+                    "serverVersion"
                   ],
                   "additionalProperties": false
                 }
+              }
+            },
+            "headers": {
+              "X-Request-Id": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Request correlation ID; matches audit traceId."
               }
             }
           },
@@ -418,6 +511,109 @@
                   "minimum": 1
                 },
                 "description": "Seconds before retrying; never blindly retry mutations."
+              },
+              "X-Request-Id": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Request correlation ID; matches audit traceId."
+              }
+            }
+          }
+        }
+      }
+    },
+    "/health/ready": {
+      "get": {
+        "operationId": "readiness",
+        "responses": {
+          "200": {
+            "description": "Ready",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Health"
+                }
+              }
+            },
+            "headers": {
+              "X-Request-Id": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Request correlation ID; matches audit traceId."
+              }
+            }
+          },
+          "429": {
+            "description": "Application quota or temporary source ban",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "description": "Seconds before retrying; never blindly retry mutations."
+              },
+              "X-Request-Id": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Request correlation ID; matches audit traceId."
+              }
+            }
+          }
+        }
+      }
+    },
+    "/metrics": {
+      "get": {
+        "operationId": "metrics",
+        "responses": {
+          "200": {
+            "description": "Low-cardinality Prometheus metrics",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "headers": {
+              "X-Request-Id": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Request correlation ID; matches audit traceId."
+              }
+            }
+          },
+          "404": {
+            "description": "Not a direct loopback request",
+            "headers": {
+              "X-Request-Id": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Request correlation ID; matches audit traceId."
+              }
+            }
+          },
+          "429": {
+            "description": "Application quota or temporary source ban",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "description": "Seconds before retrying; never blindly retry mutations."
+              },
+              "X-Request-Id": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Request correlation ID; matches audit traceId."
               }
             }
           }
@@ -494,13 +690,37 @@
                   "additionalProperties": false
                 }
               }
+            },
+            "headers": {
+              "X-Request-Id": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Request correlation ID; matches audit traceId."
+              }
             }
           },
           "400": {
-            "description": "Invalid input or CSRF"
+            "description": "Invalid input or CSRF",
+            "headers": {
+              "X-Request-Id": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Request correlation ID; matches audit traceId."
+              }
+            }
           },
           "401": {
-            "description": "Authentication required"
+            "description": "Authentication required",
+            "headers": {
+              "X-Request-Id": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Request correlation ID; matches audit traceId."
+              }
+            }
           },
           "429": {
             "description": "Application quota or temporary source ban",
@@ -511,6 +731,12 @@
                   "minimum": 1
                 },
                 "description": "Seconds before retrying; never blindly retry mutations."
+              },
+              "X-Request-Id": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Request correlation ID; matches audit traceId."
               }
             }
           }
@@ -541,13 +767,37 @@
         },
         "responses": {
           "200": {
-            "description": "Completed"
+            "description": "Completed",
+            "headers": {
+              "X-Request-Id": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Request correlation ID; matches audit traceId."
+              }
+            }
           },
           "400": {
-            "description": "Invalid input or CSRF"
+            "description": "Invalid input or CSRF",
+            "headers": {
+              "X-Request-Id": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Request correlation ID; matches audit traceId."
+              }
+            }
           },
           "401": {
-            "description": "Authentication required"
+            "description": "Authentication required",
+            "headers": {
+              "X-Request-Id": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Request correlation ID; matches audit traceId."
+              }
+            }
           },
           "429": {
             "description": "Application quota or temporary source ban",
@@ -558,6 +808,12 @@
                   "minimum": 1
                 },
                 "description": "Seconds before retrying; never blindly retry mutations."
+              },
+              "X-Request-Id": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Request correlation ID; matches audit traceId."
               }
             }
           }
@@ -598,13 +854,37 @@
         },
         "responses": {
           "200": {
-            "description": "Completed"
+            "description": "Completed",
+            "headers": {
+              "X-Request-Id": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Request correlation ID; matches audit traceId."
+              }
+            }
           },
           "400": {
-            "description": "Invalid input or CSRF"
+            "description": "Invalid input or CSRF",
+            "headers": {
+              "X-Request-Id": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Request correlation ID; matches audit traceId."
+              }
+            }
           },
           "401": {
-            "description": "Authentication required"
+            "description": "Authentication required",
+            "headers": {
+              "X-Request-Id": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Request correlation ID; matches audit traceId."
+              }
+            }
           },
           "429": {
             "description": "Application quota or temporary source ban",
@@ -615,6 +895,12 @@
                   "minimum": 1
                 },
                 "description": "Seconds before retrying; never blindly retry mutations."
+              },
+              "X-Request-Id": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Request correlation ID; matches audit traceId."
               }
             }
           }
@@ -673,13 +959,37 @@
                   "additionalProperties": false
                 }
               }
+            },
+            "headers": {
+              "X-Request-Id": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Request correlation ID; matches audit traceId."
+              }
             }
           },
           "401": {
-            "description": "Invalid authentication or expired/consumed challenge"
+            "description": "Invalid authentication or expired/consumed challenge",
+            "headers": {
+              "X-Request-Id": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Request correlation ID; matches audit traceId."
+              }
+            }
           },
           "403": {
-            "description": "Recent MFA required"
+            "description": "Recent MFA required",
+            "headers": {
+              "X-Request-Id": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Request correlation ID; matches audit traceId."
+              }
+            }
           },
           "429": {
             "description": "Application quota or temporary source ban",
@@ -690,6 +1000,12 @@
                   "minimum": 1
                 },
                 "description": "Seconds before retrying; never blindly retry mutations."
+              },
+              "X-Request-Id": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Request correlation ID; matches audit traceId."
               }
             }
           }
@@ -748,13 +1064,37 @@
                   "additionalProperties": false
                 }
               }
+            },
+            "headers": {
+              "X-Request-Id": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Request correlation ID; matches audit traceId."
+              }
             }
           },
           "401": {
-            "description": "Invalid authentication or expired/consumed challenge"
+            "description": "Invalid authentication or expired/consumed challenge",
+            "headers": {
+              "X-Request-Id": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Request correlation ID; matches audit traceId."
+              }
+            }
           },
           "403": {
-            "description": "Recent MFA required"
+            "description": "Recent MFA required",
+            "headers": {
+              "X-Request-Id": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Request correlation ID; matches audit traceId."
+              }
+            }
           },
           "429": {
             "description": "Application quota or temporary source ban",
@@ -765,6 +1105,12 @@
                   "minimum": 1
                 },
                 "description": "Seconds before retrying; never blindly retry mutations."
+              },
+              "X-Request-Id": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Request correlation ID; matches audit traceId."
               }
             }
           }
@@ -824,13 +1170,37 @@
                   "additionalProperties": false
                 }
               }
+            },
+            "headers": {
+              "X-Request-Id": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Request correlation ID; matches audit traceId."
+              }
             }
           },
           "401": {
-            "description": "Invalid authentication or expired/consumed challenge"
+            "description": "Invalid authentication or expired/consumed challenge",
+            "headers": {
+              "X-Request-Id": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Request correlation ID; matches audit traceId."
+              }
+            }
           },
           "403": {
-            "description": "Recent MFA required"
+            "description": "Recent MFA required",
+            "headers": {
+              "X-Request-Id": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Request correlation ID; matches audit traceId."
+              }
+            }
           },
           "429": {
             "description": "Application quota or temporary source ban",
@@ -841,6 +1211,12 @@
                   "minimum": 1
                 },
                 "description": "Seconds before retrying; never blindly retry mutations."
+              },
+              "X-Request-Id": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Request correlation ID; matches audit traceId."
               }
             }
           }
@@ -1148,6 +1524,18 @@
           "publicKey",
           "notAfter",
           "limits"
+        ],
+        "additionalProperties": false
+      },
+      "Health": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "const": "ready"
+          }
+        },
+        "required": [
+          "status"
         ],
         "additionalProperties": false
       },

@@ -61,11 +61,11 @@ using var store = new VaultStore(Path.Combine(state, "vault.db"), ring); store.S
 var admin = new VaultStore.Principal("acceptance", true);
 object Run(string op, object p) => store.Run(admin, op, JsonSerializer.SerializeToElement(p), Guid.NewGuid().ToString());
 Run("bucket.create", new { name = "interop" });
-var issued = JsonSerializer.SerializeToElement(Run("token.create", new { name = "acceptance", scopes = VaultStore.Scopes, bucketIds = Array.Empty<string>(), allBuckets = true, creatableBucketNames = Array.Empty<string>(), expiresAt = (string?)null }), Wire.Json);
+var issued = JsonSerializer.SerializeToElement(Run("token.create", new { name = "acceptance", scopes = VaultStore.Scopes, bucketIds = Array.Empty<string>(), allBuckets = true, creatableBucketNames = Array.Empty<string>(), expiresAt = (string?)null }), JsonSerializerOptions.Web);
 var tokenFile = Path.Combine(state, "test.token"); KeyRing.SavePrivate(tokenFile, issued.GetProperty("token").GetString()!);
 var fixturePath = Path.Combine(root, "tests", "fixtures", "jwe.json");
 if (!File.Exists(fixturePath)) throw new FileNotFoundException("The shared public JWE fixture is required.", fixturePath);
-await File.WriteAllTextAsync(Path.Combine(root, ".local", "acceptance.json"), Wire.Serialize(new { url = "https://127.0.0.1:18866", ca, tokenFile }));
+await File.WriteAllTextAsync(Path.Combine(root, ".local", "acceptance.json"), JsonSerializer.Serialize(new { url = "https://127.0.0.1:18866", ca, tokenFile }, JsonSerializerOptions.Web));
 // Seed the same temporary state for testing the published native server instead of this host.
 if (args.Skip(1).SequenceEqual(["--prepare"])) return;
 var app = VaultApplication.Build([], store, ring, state);

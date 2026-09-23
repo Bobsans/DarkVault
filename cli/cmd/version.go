@@ -15,15 +15,13 @@ func buildVersion() string {
 	}
 	commit := ""
 	modified := false
-	if commit == "" {
-		if info, ok := debug.ReadBuildInfo(); ok {
-			for _, setting := range info.Settings {
-				if setting.Key == "vcs.revision" {
-					commit = setting.Value
-				}
-				if setting.Key == "vcs.modified" {
-					modified = setting.Value == "true"
-				}
+	if info, ok := debug.ReadBuildInfo(); ok {
+		for _, setting := range info.Settings {
+			if setting.Key == "vcs.revision" {
+				commit = setting.Value
+			}
+			if setting.Key == "vcs.modified" {
+				modified = setting.Value == "true"
 			}
 		}
 	}

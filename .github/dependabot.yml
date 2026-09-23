@@ -4,6 +4,10 @@ updates:
     directory: /clients/typescript
     schedule:
       interval: weekly
+  - package-ecosystem: npm
+    directory: /admin
+    schedule:
+      interval: weekly
   - package-ecosystem: pip
     directory: /clients/python
     schedule:

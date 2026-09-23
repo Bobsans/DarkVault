@@ -133,8 +133,9 @@ def check(assets: Path, tag: str, commit: str) -> None:
         assert archive.getmember("package/dist/index.d.ts").size > 0
     with tarfile.open(assets / f"darkvault-go-{tag}.tar.gz") as archive:
         assert json.load(archive.extractfile("release.json")) == metadata
-        required_go_files = {"go.mod", "go.sum", "client.go", "operations.go", "configuration.go", "configuration_test.go"}
-        assert required_go_files <= set(archive.getnames()), "Incomplete Go SDK sources"
+        archived_go_files = {name for name in archive.getnames() if name.endswith(".go")}
+        tracked_go_files = {path.removeprefix("clients/go/") for path in subprocess.check_output(["git", "ls-files", "clients/go"], text=True).splitlines() if path.endswith(".go")}
+        assert archived_go_files == tracked_go_files, "Go SDK archive does not match tracked Go sources"
         major = int(version.split(".")[0])
         module = "github.com/Bobsans/DarkVault/clients/go" + (f"/v{major}" if major >= 2 else "")
         assert archive.extractfile("go.mod").read().decode().splitlines()[0] == f"module {module}", "Wrong Go module major"

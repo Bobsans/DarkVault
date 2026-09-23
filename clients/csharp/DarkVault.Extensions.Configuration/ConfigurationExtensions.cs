@@ -39,7 +39,7 @@ public static class DarkVaultConfigurationExtensions {
         var snapshot = await client.ReadBucketSnapshotAsync(bucket, cancellationToken);
         var secrets = SecretValues.Typed(snapshot).ToDictionary(p => p.Key,
             p => p.Value.ValueKind == System.Text.Json.JsonValueKind.Null ? null : snapshot.Secrets[p.Key]);
-        try { SecretValues.ValidateConfigurationPaths(secrets.Keys); } catch (ArgumentException ex) { throw new InvalidOperationException("Bucket contains conflicting configuration paths.", ex); }
+        try { SecretValues.ValidateNativeConfigurationPaths(secrets.Keys); } catch (ArgumentException ex) { throw new InvalidOperationException("Bucket contains conflicting configuration paths.", ex); }
         return builder.AddInMemoryCollection(secrets);
     }
 }

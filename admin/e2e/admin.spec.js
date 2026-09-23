@@ -1,309 +1,343 @@
 import { test, expect } from '@playwright/test';
 import { readFile } from 'node:fs/promises';
 
+// One browser session runs the whole journey: the first sign-in registers the only passkey, and later
+// steps depend on the buckets and tokens created earlier. Steps localize failures in the report.
 test('Admin navigation, audit filters and encrypted CRUD work on desktop and mobile', async ({ page }) => {
   test.setTimeout(60000);
   const cdp = await page.context().newCDPSession(page);
   await cdp.send('WebAuthn.enable');
   await cdp.send('WebAuthn.addVirtualAuthenticator', { options: { protocol: 'ctap2', transport: 'usb', hasResidentKey: true, hasUserVerification: true, isUserVerified: true, automaticPresenceSimulation: true } });
   const errors = []; page.on('pageerror', error => errors.push(error.message));
+  const cspViolations = []; page.on('console', message => { if (message.type() === 'error' && /content security policy/i.test(message.text())) cspViolations.push(message.text()); });
   const sent = []; page.on('request', request => { if (request.url().endsWith('/execute')) sent.push(request.postData()); });
   await page.setViewportSize({ width: 1440, height: 1000 });
-  // An unauthenticated deep link must survive signing in.
-  await page.goto('/admin/logs');
-  await page.screenshot({ path: 'test-results/admin-login.png' });
-  await page.getByLabel('Password', { exact: true }).fill('acceptance-test-password-only');
-  await page.getByRole('button', { name: 'Sign in', exact: true }).click();
-  await expect(page.locator('#workspace')).toBeVisible();
-  await expect(page.locator('#value-dialog')).toBeVisible();
-  await expect(page.locator('#value-text')).toHaveValue(/dvrc_/);
-  await expect(page.locator('#value-type-label')).toBeHidden();
-  await expect(page.locator('#save-value')).toBeHidden();
-  await expect(page.locator('#value-text')).toHaveAttribute('readonly', '');
-  await page.locator('#close-value').click();
-  await expect(page.locator('#value-text')).toHaveValue('');
-  await expect(page.locator('#audit-list tr').first()).toBeVisible();
-  await expect(page).toHaveURL(/\/admin\/logs$/);
   const nav = page.getByRole('navigation', { name: 'Main navigation' });
-  await nav.getByRole('link', { name: 'Buckets', exact: true }).click();
-  await expect(page).toHaveURL(/\/admin\/buckets$/);
   let name = 'payments_production';
-  for (const [bucket, description] of [[name, 'Production credentials for the payments platform.'], ['payments_staging', 'Isolated secrets for integration tests and previews.'], ['payments_workers', 'Background jobs, queues, and scheduled processing.']]) {
-    await page.getByRole('button', { name: 'New bucket', exact: true }).click();
-    await page.locator('#bucket-form').getByLabel('Name', { exact: true }).fill(bucket);
-    await page.locator('#bucket-form').getByLabel('Description', { exact: true }).fill(description);
-    await page.getByRole('button', { name: 'Create bucket', exact: true }).click();
-    await expect(page.getByRole('link', { name: 'Open ' + bucket, exact: true })).toBeVisible();
-  }
-  await page.getByLabel('Find a bucket', { exact: true }).fill('payments');
-  await expect(page.locator('#bucket-list .card')).toHaveCount(3);
-  await page.screenshot({ path: 'test-results/admin-buckets.png' });
-  await page.getByRole('link', { name: 'Open ' + name, exact: true }).click();
-  await expect(page).toHaveURL('/admin/buckets/' + name);
-  await expect(page.locator('#bucket-title')).toHaveText(name);
-  await page.reload();
-  await expect(page.locator('#bucket-title')).toHaveText(name);
-  await expect(page.locator('#page-content')).not.toHaveAttribute('aria-busy', 'true');
-  const keyBox = await page.getByLabel('Key', { exact: true }).boundingBox();
-  const valueBox = await page.locator('#secret-form textarea').boundingBox();
-  expect(Math.abs(keyBox.y - valueBox.y)).toBeLessThan(2);
-  expect(Math.abs(keyBox.height - valueBox.height)).toBeLessThan(2);
-  await page.getByLabel('Key', { exact: true }).fill('ConnectionStrings:Main');
-  await page.locator('#secret-form').getByLabel('Value', { exact: true }).fill('browser-secret-秘密');
-  await page.getByRole('button', { name: 'Add secret', exact: true }).click();
-  await page.getByRole('button', { name: 'Show / edit', exact: true }).click();
-  await expect(page.locator('#value-text')).toHaveValue('browser-secret-秘密');
-  await expect(page.getByLabel('Value type', { exact: true })).toBeVisible();
-  await page.locator('#value-text').fill('updated');
-  await page.getByRole('button', { name: 'Save', exact: true }).click();
-  await page.getByRole('button', { name: 'Show / edit', exact: true }).click();
-  await expect(page.locator('#value-text')).toHaveValue('updated');
-  // Browser history navigation also clears decrypted values and closes the dialog.
-  await page.goBack();
-  await expect(page).toHaveURL(/\/admin\/buckets$/);
-  await expect(page.locator('#value-dialog')).not.toBeVisible();
-  await expect(page.locator('#value-text')).toHaveValue('');
-  await page.goForward();
-  await expect(page).toHaveURL('/admin/buckets/' + name);
-  await expect(page.getByRole('button', { name: 'Show / edit', exact: true })).toBeVisible();
-  await page.screenshot({ path: 'test-results/admin-secrets.png' });
 
-  for (const [key, type, value] of [['Redis:Port', 'number', '6379'], ['Redis:Enabled', 'boolean', 'false'], ['Redis:Optional', 'null', ''], ['Literal\\:Name', 'string', '00123']]) {
-    await page.getByLabel('Key', { exact: true }).fill(key);
-    await page.getByLabel('Secret type', { exact: true }).selectOption(type);
-    await page.locator('#secret-form').getByLabel('Value', { exact: true }).fill(value);
+  await test.step('Sign in, register a passkey and keep the deep link', async () => {
+    // An unauthenticated deep link must survive signing in.
+    await page.goto('/admin/logs');
+    await page.screenshot({ path: 'test-results/admin-login.png' });
+    await page.getByLabel('Password', { exact: true }).fill('acceptance-test-password-only');
+    await page.getByRole('button', { name: 'Sign in', exact: true }).click();
+    await expect(page.locator('#workspace')).toBeVisible();
+    await expect(page.locator('#value-dialog')).toBeVisible();
+    await expect(page.locator('#value-text')).toHaveValue(/dvrc_/);
+    await expect(page.locator('#value-type-label')).toBeHidden();
+    await expect(page.locator('#save-value')).toBeHidden();
+    await expect(page.locator('#value-text')).toHaveAttribute('readonly', '');
+    await page.locator('#close-value').click();
+    await expect(page.locator('#value-text')).toHaveValue('');
+    await expect(page.locator('#audit-list tr').first()).toBeVisible();
+    await expect(page).toHaveURL(/\/admin\/logs$/);
+  });
+
+  await test.step('Create and search buckets', async () => {
+    await nav.getByRole('link', { name: 'Buckets', exact: true }).click();
+    await expect(page).toHaveURL(/\/admin\/buckets$/);
+    for (const [bucket, description] of [[name, 'Production credentials for the payments platform.'], ['payments_staging', 'Isolated secrets for integration tests and previews.'], ['payments_workers', 'Background jobs, queues, and scheduled processing.']]) {
+      await page.getByRole('button', { name: 'New bucket', exact: true }).click();
+      await page.locator('#bucket-form').getByLabel('Name', { exact: true }).fill(bucket);
+      await page.locator('#bucket-form').getByLabel('Description', { exact: true }).fill(description);
+      await page.getByRole('button', { name: 'Create bucket', exact: true }).click();
+      await expect(page.getByRole('link', { name: 'Open ' + bucket, exact: true })).toBeVisible();
+    }
+    await page.getByLabel('Find a bucket', { exact: true }).fill('payments');
+    await expect(page.locator('#bucket-list .card')).toHaveCount(3);
+    await page.screenshot({ path: 'test-results/admin-buckets.png' });
+  });
+
+  await test.step('Add, edit and clear a secret value', async () => {
+    await page.getByRole('link', { name: 'Open ' + name, exact: true }).click();
+    await expect(page).toHaveURL('/admin/buckets/' + name);
+    await expect(page.locator('#bucket-title')).toHaveText(name);
+    await page.reload();
+    await expect(page.locator('#bucket-title')).toHaveText(name);
+    await expect(page.locator('#page-content')).not.toHaveAttribute('aria-busy', 'true');
+    const keyBox = await page.getByLabel('Key', { exact: true }).boundingBox();
+    const valueBox = await page.locator('#secret-form textarea').boundingBox();
+    expect(Math.abs(keyBox.y - valueBox.y)).toBeLessThan(2);
+    expect(Math.abs(keyBox.height - valueBox.height)).toBeLessThan(2);
+    await page.getByLabel('Key', { exact: true }).fill('ConnectionStrings:Main');
+    await page.locator('#secret-form').getByLabel('Value', { exact: true }).fill('browser-secret-秘密');
     await page.getByRole('button', { name: 'Add secret', exact: true }).click();
-    await expect(page.locator('#secret-list')).toContainText(key);
-  }
-  const flagRow = page.locator('#secret-list article').filter({ hasText: 'Redis:Enabled' });
-  await flagRow.getByRole('button', { name: 'Show / edit', exact: true }).click();
-  await expect(page.getByLabel('Value type', { exact: true })).toHaveValue('boolean');
-  await page.locator('#value-text').fill('true');
-  await page.getByRole('button', { name: 'Save', exact: true }).click();
-  await page.getByRole('link', { name: 'Configuration', exact: true }).click();
-  await expect(page).toHaveURL(/\?view=configuration$/);
-  await expect(page.locator('#config-output')).toContainText('<hidden:number>');
-  await expect(page.getByRole('button', { name: 'Copy configuration', exact: true })).toBeDisabled();
-  await expect(page.locator('#config-output')).not.toContainText('updated');
-  await page.getByRole('button', { name: 'Reveal all values', exact: true }).click();
-  await expect(page.locator('#config-help')).toContainText('Values revealed');
-  const config = JSON.parse(await page.locator('#config-output').textContent());
-  expect(config.Redis).toEqual({ Port: 6379, Enabled: true, Optional: null });
-  expect(config['Literal:Name']).toBe('00123');
-  expect(config.ConnectionStrings.Main).toBe('updated');
-  await page.screenshot({ path: 'test-results/admin-configuration.png' });
-  const downloadEvent = page.waitForEvent('download');
-  await page.getByRole('button', { name: 'Download', exact: true }).click();
-  const download = await downloadEvent;
-  expect(JSON.parse(await readFile(await download.path(), 'utf8'))).toEqual(config);
-  await page.getByLabel('Configuration format', { exact: true }).selectOption('yaml');
-  await expect(page.locator('#config-output')).toContainText('"Port": 6379');
-  await expect(page.locator('#config-output')).toContainText('"Enabled": true');
-  await expect(page.locator('#config-output')).toContainText('"Literal:Name": "00123"');
-  await page.getByRole('button', { name: 'Hide values', exact: true }).click();
-  await expect(page.locator('#config-output')).not.toContainText('updated');
-  await expect(page.getByRole('button', { name: 'Download', exact: true })).toBeDisabled();
-  await page.reload();
-  await expect(page.locator('#config-output')).toContainText('<hidden:');
-
-  await page.getByRole('link', { name: 'Secrets', exact: true }).click();
-  await page.getByText('Bucket settings', { exact: true }).click();
-  const settings = page.locator('#description-form');
-  await settings.getByLabel('Name', { exact: true }).fill('payments_staging');
-  await settings.getByRole('button', { name: 'Save', exact: true }).click();
-  await expect(page.locator('#status')).toContainText('already_exists');
-  await expect(page.locator('#bucket-title')).toHaveText(name);
-  await settings.getByLabel('Name', { exact: true }).fill('payments_renamed');
-  await settings.getByRole('button', { name: 'Save', exact: true }).click();
-  name = 'payments_renamed';
-  await expect(page).toHaveURL('/admin/buckets/' + name);
-  await expect(page.locator('#bucket-title')).toHaveText(name);
-  await expect(page.locator('#secret-list')).toContainText('ConnectionStrings:Main');
-  await page.reload();
-  await expect(settings.getByLabel('Name', { exact: true })).toHaveValue(name);
-  await page.screenshot({ path: 'test-results/admin-bucket-renamed.png' });
-
-  await nav.getByRole('link', { name: 'Access tokens', exact: true }).click();
-  await expect(page.locator('#config-output')).toBeEmpty();
-  await expect(page).toHaveURL(/\/admin\/tokens$/);
-  await expect(page.locator('#page-content')).not.toHaveAttribute('aria-busy', 'true');
-  await page.getByRole('button', { name: 'New token', exact: true }).click();
-  await expect(page.locator('.sidebar')).not.toContainText('Server workspace');
-  await expect(page.locator('#token-archive')).toBeHidden();
-  const initialTokenCount = await page.locator('#token-count').textContent();
-  await expect(page.locator('#scopes .grant-row')).toHaveCount(9);
-  await expect(page.getByRole('checkbox', { name: 'secret:read', exact: true })).toHaveAccessibleDescription('Read secret values.');
-  await expect(page.locator('#token-buckets').getByRole('checkbox', { name, exact: true })).toHaveAccessibleDescription('Production credentials for the payments platform.');
-  await page.locator('#token-form').getByLabel('Name', { exact: true }).fill('Payments service');
-  await page.getByRole('button', { name: 'Select bucket reader scopes' }).click();
-  await expect(page.locator('#scopes input:checked')).toHaveCount(3);
-  await page.locator('#token-buckets').getByLabel(name, { exact: true }).check();
-  await page.screenshot({ path: 'test-results/admin-token-scopes.png', fullPage: true });
-  await page.setViewportSize({ width: 390, height: 844 });
-  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
-  await page.screenshot({ path: 'test-results/admin-token-scopes-mobile.png', fullPage: true });
-  await page.setViewportSize({ width: 1440, height: 1000 });
-  const expiryInput = page.locator('#token-expiry');
-  let defaultExpiry = await expiryInput.inputValue();
-  const lifetime = page.getByLabel('Expiration', { exact: true });
-  await expect(lifetime).toHaveValue('720');
-  for (const hours of ['24', '168', '720', '2160', '4320']) {
-    await lifetime.selectOption(hours);
-    const difference = await expiryInput.evaluate((input) => new Date(input.value.replace(' ', 'T')).getTime() - Date.now());
-    expect(difference).toBeGreaterThan(Number(hours) * 3600000 - 65000);
-    expect(difference).toBeLessThanOrEqual(Number(hours) * 3600000);
-  }
-  await lifetime.selectOption('choose');
-  await expect(page.locator('#expiry-dialog')).toBeVisible();
-  await page.keyboard.press('Escape');
-  await expect(lifetime).toHaveValue('4320');
-  await expect(expiryInput).toBeHidden();
-  await lifetime.selectOption('720');
-  defaultExpiry = await expiryInput.inputValue();
-  await lifetime.selectOption('choose');
-  const picker = page.locator('#expiry-dialog');
-  await expect(picker).toBeVisible();
-  await expect(picker.locator('[aria-pressed="true"]')).toBeFocused();
-  while (await picker.getByRole('button', { name: 'Previous month', exact: true }).isEnabled()) {
-    await picker.getByRole('button', { name: 'Previous month', exact: true }).click();
-  }
-  await expect(picker.getByRole('button', { name: 'Previous month', exact: true })).toBeDisabled();
-  // Days outside the server's calendar-year window cannot be selected.
-  const today = await page.evaluate(() => {
-    const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+    await page.getByRole('button', { name: 'Show / edit', exact: true }).click();
+    await expect(page.locator('#value-text')).toHaveValue('browser-secret-秘密');
+    await expect(page.getByLabel('Value type', { exact: true })).toBeVisible();
+    await page.locator('#value-text').fill('updated');
+    await page.getByRole('button', { name: 'Save', exact: true }).click();
+    await page.getByRole('button', { name: 'Show / edit', exact: true }).click();
+    await expect(page.locator('#value-text')).toHaveValue('updated');
+    // Browser history navigation also clears decrypted values and closes the dialog.
+    await page.goBack();
+    await expect(page).toHaveURL(/\/admin\/buckets$/);
+    await expect(page.locator('#value-dialog')).not.toBeVisible();
+    await expect(page.locator('#value-text')).toHaveValue('');
+    await page.goForward();
+    await expect(page).toHaveURL('/admin/buckets/' + name);
+    await expect(page.getByRole('button', { name: 'Show / edit', exact: true })).toBeVisible();
+    await page.screenshot({ path: 'test-results/admin-secrets.png' });
   });
-  for (const button of await picker.locator('[data-date]').all()) {
-    if ((await button.getAttribute('data-date')) < today) await expect(button).toBeDisabled();
-  }
-  await picker.locator(`[data-date="${today}"]`).click();
-  await page.getByLabel('Time (local)', { exact: true }).fill('00:00');
-  await picker.getByRole('button', { name: 'Apply date', exact: true }).click();
-  await expect(page.locator('#expiry-picker-error')).toHaveText('Expiry must be in the future.');
-  await expect(expiryInput).toHaveValue(defaultExpiry);
-  let months = 0;
-  while (await picker.getByRole('button', { name: 'Next month', exact: true }).isEnabled()) {
-    expect(months++).toBeLessThan(13);
-    await picker.getByRole('button', { name: 'Next month', exact: true }).click();
-  }
-  const maximumDay = await page.evaluate(() => {
-    const d = new Date(); const month = d.getUTCMonth(); d.setUTCFullYear(d.getUTCFullYear()+1); if (d.getUTCMonth() !== month) d.setUTCDate(0); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+
+  await test.step('Typed values and configuration export', async () => {
+    for (const [key, type, value] of [['Redis:Port', 'number', '6379'], ['Redis:Enabled', 'boolean', 'false'], ['Redis:Optional', 'null', ''], ['Literal\\:Name', 'string', '00123']]) {
+      await page.getByLabel('Key', { exact: true }).fill(key);
+      await page.getByLabel('Secret type', { exact: true }).selectOption(type);
+      await page.locator('#secret-form').getByLabel('Value', { exact: true }).fill(value);
+      await page.getByRole('button', { name: 'Add secret', exact: true }).click();
+      await expect(page.locator('#secret-list')).toContainText(key);
+    }
+    const flagRow = page.locator('#secret-list article').filter({ hasText: 'Redis:Enabled' });
+    await flagRow.getByRole('button', { name: 'Show / edit', exact: true }).click();
+    await expect(page.getByLabel('Value type', { exact: true })).toHaveValue('boolean');
+    await page.locator('#value-text').fill('true');
+    await page.getByRole('button', { name: 'Save', exact: true }).click();
+    await page.getByRole('link', { name: 'Configuration', exact: true }).click();
+    await expect(page).toHaveURL(/\?view=configuration$/);
+    await expect(page.locator('#config-output')).toContainText('<hidden:number>');
+    await expect(page.getByRole('button', { name: 'Copy configuration', exact: true })).toBeDisabled();
+    await expect(page.locator('#config-output')).not.toContainText('updated');
+    await page.getByRole('button', { name: 'Reveal all values', exact: true }).click();
+    await expect(page.locator('#config-help')).toContainText('Values revealed');
+    const config = JSON.parse(await page.locator('#config-output').textContent());
+    expect(config.Redis).toEqual({ Port: 6379, Enabled: true, Optional: null });
+    expect(config['Literal:Name']).toBe('00123');
+    expect(config.ConnectionStrings.Main).toBe('updated');
+    await page.screenshot({ path: 'test-results/admin-configuration.png' });
+    const downloadEvent = page.waitForEvent('download');
+    await page.getByRole('button', { name: 'Download', exact: true }).click();
+    const download = await downloadEvent;
+    expect(JSON.parse(await readFile(await download.path(), 'utf8'))).toEqual(config);
+    await page.getByLabel('Configuration format', { exact: true }).selectOption('yaml');
+    await expect(page.locator('#config-output')).toContainText('"Port": 6379');
+    await expect(page.locator('#config-output')).toContainText('"Enabled": true');
+    await expect(page.locator('#config-output')).toContainText('"Literal:Name": "00123"');
+    await page.getByRole('button', { name: 'Hide values', exact: true }).click();
+    await expect(page.locator('#config-output')).not.toContainText('updated');
+    await expect(page.getByRole('button', { name: 'Download', exact: true })).toBeDisabled();
+    await page.reload();
+    await expect(page.locator('#config-output')).toContainText('<hidden:');
   });
-  for (const button of await picker.locator('[data-date]').all()) {
-    if ((await button.getAttribute('data-date')) > maximumDay) await expect(button).toBeDisabled();
-  }
-  await page.keyboard.press('Escape');
-  await expect(picker).toBeHidden();
-  await expect(expiryInput).toHaveValue(defaultExpiry);
-  await expect(lifetime).toHaveValue('720');
-  await expect(lifetime).toBeFocused();
-  await lifetime.selectOption('choose');
-  const selectedDay = picker.locator('[aria-pressed="true"]');
-  await selectedDay.press('Enter');
-  await page.getByLabel('Time (local)', { exact: true }).fill('13:45');
-  await page.screenshot({ path: 'test-results/admin-expiry-calendar.png' });
-  await page.setViewportSize({ width: 390, height: 844 });
-  await expect(picker).toBeInViewport();
-  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
-  await page.screenshot({ path: 'test-results/admin-expiry-mobile.png' });
-  await picker.getByRole('button', { name: 'Apply date', exact: true }).click();
-  await expect(picker).toBeHidden();
-  await expect(expiryInput).toHaveValue(defaultExpiry.slice(0, 10) + ' 13:45');
-  await expect(page.locator('#expiry-error')).toBeHidden();
-  await expect(lifetime).toHaveValue('custom');
-  await expect(lifetime.locator('option:checked')).toHaveText(/13:45|1:45 PM/);
-  await page.screenshot({ path: 'test-results/admin-expiration-custom.png' });
-  await lifetime.selectOption('choose');
-  await expect(picker).toBeVisible();
-  await picker.getByRole('button', { name: 'Cancel', exact: true }).click();
-  await expect(lifetime).toHaveValue('custom');
-  await page.setViewportSize({ width: 1440, height: 1000 });
-  await lifetime.selectOption('year');
-  const yearlyExpiry = await expiryInput.inputValue();
-  const yearlyDuration = await expiryInput.evaluate(input => new Date(input.value.replace(' ', 'T')).getTime() - Date.now());
-  expect(yearlyDuration).toBeGreaterThan(365 * 86400000 - 65000);
-  expect(yearlyDuration).toBeLessThanOrEqual(366 * 86400000);
-  await expect(lifetime.locator('option:checked')).toHaveText(/^1 year \(/);
-  await lifetime.click();
-  await page.screenshot({ path: 'test-results/admin-expiration-menu.png' });
-  await page.keyboard.press('Escape');
-  await page.screenshot({ path: 'test-results/admin-token-presets.png' });
-  await page.getByRole('button', { name: 'Create token', exact: true }).click();
-  await expect(page.locator('#value-text')).toHaveValue(/^dv1_[A-Za-z0-9_-]{60}$/);
-  await expect(page.locator('#value-type-label')).toBeHidden();
-  await page.getByRole('button', { name: 'Close', exact: true }).click();
-  await expect(page.locator('#value-text')).toHaveValue('');
-  const tokenRow = page.locator('#token-list article').filter({ hasText: 'Payments service' });
-  await expect(page.locator('#token-count')).toHaveText(String(Number(initialTokenCount) + 1));
-  page.once('dialog', dialog => dialog.accept()); await tokenRow.getByRole('button', { name: 'Revoke', exact: true }).click();
-  await expect(tokenRow).toHaveCount(0);
-  await expect(page.locator('#token-count')).toHaveText(initialTokenCount);
-  await expect(page.locator('#revoked-token-count')).toHaveText('1');
-  await expect(page.locator('#token-buckets').getByLabel(name, { exact: true })).toBeChecked();
-  await page.locator('#token-archive summary').click();
-  const archivedRow = page.locator('#revoked-token-list article').filter({ hasText: 'Payments service' });
-  await expect(archivedRow).toContainText('Revoked:');
-  await expect(archivedRow.getByRole('button', { name: 'Revoke', exact: true })).toHaveCount(0);
-  const formattedExpiry = await page.evaluate(value => new Date(value.replace(' ', 'T')).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' }), yearlyExpiry);
-  await expect(archivedRow).toContainText(formattedExpiry);
-  await page.screenshot({ path: 'test-results/admin-tokens.png' });
 
-  await nav.getByRole('link', { name: 'Activity logs', exact: true }).click();
-  await expect(page).toHaveURL(/\/admin\/logs$/);
-  await expect(nav.getByRole('link', { name: 'Activity logs', exact: true })).toHaveAttribute('aria-current', 'page');
-  const eventType = page.getByLabel('Event type', { exact: true });
-  await expect(eventType).toHaveCSS('appearance', 'base-select');
-  await eventType.click();
-  await page.screenshot({ path: 'test-results/admin-select.png' });
-  await page.getByRole('option', { name: 'Operations', exact: true }).click();
-  await expect(eventType).toHaveValue('operation');
-  await eventType.focus();
-  await page.keyboard.press('Space');
-  await page.keyboard.press('ArrowDown');
-  await page.keyboard.press('Enter');
-  await expect(eventType).toHaveValue('http');
-  await page.getByLabel('Search logs', { exact: true }).fill('payments_production');
-  await page.getByLabel('Event type', { exact: true }).selectOption('operation');
-  await page.getByRole('button', { name: 'Apply filters', exact: true }).click();
-  await expect(page).toHaveURL('/admin/logs?search=payments_production&kind=operation');
-  await expect(page.locator('#audit-list')).toContainText('secret.update');
-  await expect(page.locator('#audit-list')).not.toContainText('browser-secret-秘密');
-  await page.reload();
-  await expect(page.getByLabel('Search logs', { exact: true })).toHaveValue('payments_production');
-  await expect(page.getByLabel('Event type', { exact: true })).toHaveValue('operation');
-  await expect(page.locator('#audit-list')).toContainText('secret.update');
-  await page.locator('#audit-list button').first().click();
-  await expect(page.locator('.log-details').first()).toBeVisible();
-  await expect(page.locator('.log-details').first()).toContainText('Trace ID');
-  await page.locator('#audit-list button').first().click();
-  await page.screenshot({ path: 'test-results/admin-logs.png' });
-  await page.getByLabel('Search logs', { exact: true }).fill('no-event-matches-this-string');
-  await page.getByRole('button', { name: 'Apply filters', exact: true }).click();
-  await expect(page.locator('#audit-empty')).toBeVisible();
-  await page.goBack();
-  await expect(page.locator('#audit-list')).toContainText('secret.update');
-  await page.setViewportSize({ width: 390, height: 844 });
-  await expect(page.getByRole('button', { name: 'Apply filters', exact: true })).toBeVisible();
-  await expect(nav.getByRole('link', { name: 'Settings', exact: true })).toBeInViewport();
-  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
-  await page.screenshot({ path: 'test-results/admin-mobile.png' });
-  await page.setViewportSize({ width: 1440, height: 1000 });
+  await test.step('Rename a bucket', async () => {
+    await page.getByRole('link', { name: 'Secrets', exact: true }).click();
+    await page.getByText('Bucket settings', { exact: true }).click();
+    const settings = page.locator('#description-form');
+    await settings.getByLabel('Name', { exact: true }).fill('payments_staging');
+    await settings.getByRole('button', { name: 'Save', exact: true }).click();
+    await expect(page.locator('#status')).toContainText('already_exists');
+    await expect(page.locator('#bucket-title')).toHaveText(name);
+    await settings.getByLabel('Name', { exact: true }).fill('payments_renamed');
+    await settings.getByRole('button', { name: 'Save', exact: true }).click();
+    name = 'payments_renamed';
+    await expect(page).toHaveURL('/admin/buckets/' + name);
+    await expect(page.locator('#bucket-title')).toHaveText(name);
+    await expect(page.locator('#secret-list')).toContainText('ConnectionStrings:Main');
+    await page.reload();
+    await expect(settings.getByLabel('Name', { exact: true })).toHaveValue(name);
+    await page.screenshot({ path: 'test-results/admin-bucket-renamed.png' });
+  });
 
-  await nav.getByRole('link', { name: 'Settings', exact: true }).click();
-  await expect(page).toHaveURL(/\/admin\/settings$/);
-  const settingsHeading = await page.getByRole('heading', { name: 'Security settings', exact: true }).boundingBox();
-  const passkeysHeading = await page.getByRole('heading', { name: 'Passkeys', exact: true }).boundingBox();
-  expect(passkeysHeading.y).toBeGreaterThan(settingsHeading.y + settingsHeading.height);
-  await page.screenshot({ path: 'test-results/admin-settings.png' });
-  await page.getByLabel('Current password', { exact: true }).fill('acceptance-test-password-only');
-  await page.getByLabel('New password', { exact: true }).fill('acceptance-test-password-updated');
-  await page.getByRole('button', { name: 'Change password and sign out', exact: true }).click();
-  await expect(page.locator('#login')).toBeVisible();
-  await page.getByLabel('Password', { exact: true }).fill('acceptance-test-password-updated');
-  await page.getByRole('button', { name: 'Sign in', exact: true }).click();
-  await expect(page.locator('#password-view')).toBeVisible();
-  await page.getByRole('button', { name: 'Sign out', exact: true }).click();
-  await expect(page.locator('#login')).toBeVisible();
-  expect(errors).toEqual([]);
-  expect(sent.length).toBeGreaterThan(0);
-  expect(sent.every(body => body && !body.includes('browser-secret') && !body.includes('updated') && body.split('.').length === 5)).toBe(true);
+  await test.step('Choose token expiry, issue and revoke a token', async () => {
+    await nav.getByRole('link', { name: 'Access tokens', exact: true }).click();
+    await expect(page.locator('#config-output')).toBeEmpty();
+    await expect(page).toHaveURL(/\/admin\/tokens$/);
+    await expect(page.locator('#page-content')).not.toHaveAttribute('aria-busy', 'true');
+    await page.getByRole('button', { name: 'New token', exact: true }).click();
+    await expect(page.locator('.sidebar')).not.toContainText('Server workspace');
+    await expect(page.locator('#token-archive')).toBeHidden();
+    const initialTokenCount = await page.locator('#token-count').textContent();
+    await expect(page.locator('#scopes .grant-row')).toHaveCount(9);
+    await expect(page.getByRole('checkbox', { name: 'secret:read', exact: true })).toHaveAccessibleDescription('Read secret values.');
+    await expect(page.locator('#token-buckets').getByRole('checkbox', { name, exact: true })).toHaveAccessibleDescription('Production credentials for the payments platform.');
+    await page.locator('#token-form').getByLabel('Name', { exact: true }).fill('Payments service');
+    await page.getByRole('button', { name: 'Select bucket reader scopes' }).click();
+    await expect(page.locator('#scopes input:checked')).toHaveCount(3);
+    await page.locator('#token-buckets').getByLabel(name, { exact: true }).check();
+    await page.screenshot({ path: 'test-results/admin-token-scopes.png', fullPage: true });
+    await page.setViewportSize({ width: 390, height: 844 });
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+    await page.screenshot({ path: 'test-results/admin-token-scopes-mobile.png', fullPage: true });
+    await page.setViewportSize({ width: 1440, height: 1000 });
+    const expiryInput = page.locator('#token-expiry');
+    let defaultExpiry = await expiryInput.inputValue();
+    const lifetime = page.getByLabel('Expiration', { exact: true });
+    await expect(lifetime).toHaveValue('720');
+    for (const hours of ['24', '168', '720', '2160', '4320']) {
+      await lifetime.selectOption(hours);
+      const difference = await expiryInput.evaluate((input) => new Date(input.value.replace(' ', 'T')).getTime() - Date.now());
+      expect(difference).toBeGreaterThan(Number(hours) * 3600000 - 65000);
+      expect(difference).toBeLessThanOrEqual(Number(hours) * 3600000);
+    }
+    await lifetime.selectOption('choose');
+    await expect(page.locator('#expiry-dialog')).toBeVisible();
+    await page.keyboard.press('Escape');
+    await expect(lifetime).toHaveValue('4320');
+    await expect(expiryInput).toBeHidden();
+    await lifetime.selectOption('720');
+    defaultExpiry = await expiryInput.inputValue();
+    await lifetime.selectOption('choose');
+    const picker = page.locator('#expiry-dialog');
+    await expect(picker).toBeVisible();
+    await expect(picker.locator('[aria-pressed="true"]')).toBeFocused();
+    while (await picker.getByRole('button', { name: 'Previous month', exact: true }).isEnabled()) {
+      await picker.getByRole('button', { name: 'Previous month', exact: true }).click();
+    }
+    await expect(picker.getByRole('button', { name: 'Previous month', exact: true })).toBeDisabled();
+    // Days outside the server's calendar-year window cannot be selected.
+    const today = await page.evaluate(() => {
+      const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+    });
+    for (const button of await picker.locator('[data-date]').all()) {
+      if ((await button.getAttribute('data-date')) < today) await expect(button).toBeDisabled();
+    }
+    await picker.locator(`[data-date="${today}"]`).click();
+    await page.getByLabel('Time (local)', { exact: true }).fill('00:00');
+    await picker.getByRole('button', { name: 'Apply date', exact: true }).click();
+    await expect(page.locator('#expiry-picker-error')).toHaveText('Expiry must be in the future.');
+    await expect(expiryInput).toHaveValue(defaultExpiry);
+    let months = 0;
+    while (await picker.getByRole('button', { name: 'Next month', exact: true }).isEnabled()) {
+      expect(months++).toBeLessThan(13);
+      await picker.getByRole('button', { name: 'Next month', exact: true }).click();
+    }
+    const maximumDay = await page.evaluate(() => {
+      const d = new Date(); const month = d.getUTCMonth(); d.setUTCFullYear(d.getUTCFullYear()+1); if (d.getUTCMonth() !== month) d.setUTCDate(0); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+    });
+    for (const button of await picker.locator('[data-date]').all()) {
+      if ((await button.getAttribute('data-date')) > maximumDay) await expect(button).toBeDisabled();
+    }
+    await page.keyboard.press('Escape');
+    await expect(picker).toBeHidden();
+    await expect(expiryInput).toHaveValue(defaultExpiry);
+    await expect(lifetime).toHaveValue('720');
+    await expect(lifetime).toBeFocused();
+    await lifetime.selectOption('choose');
+    const selectedDay = picker.locator('[aria-pressed="true"]');
+    await selectedDay.press('Enter');
+    await page.getByLabel('Time (local)', { exact: true }).fill('13:45');
+    await page.screenshot({ path: 'test-results/admin-expiry-calendar.png' });
+    await page.setViewportSize({ width: 390, height: 844 });
+    await expect(picker).toBeInViewport();
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+    await page.screenshot({ path: 'test-results/admin-expiry-mobile.png' });
+    await picker.getByRole('button', { name: 'Apply date', exact: true }).click();
+    await expect(picker).toBeHidden();
+    await expect(expiryInput).toHaveValue(defaultExpiry.slice(0, 10) + ' 13:45');
+    await expect(page.locator('#expiry-error')).toBeHidden();
+    await expect(lifetime).toHaveValue('custom');
+    await expect(lifetime.locator('option:checked')).toHaveText(/13:45|1:45 PM/);
+    await page.screenshot({ path: 'test-results/admin-expiration-custom.png' });
+    await lifetime.selectOption('choose');
+    await expect(picker).toBeVisible();
+    await picker.getByRole('button', { name: 'Cancel', exact: true }).click();
+    await expect(lifetime).toHaveValue('custom');
+    await page.setViewportSize({ width: 1440, height: 1000 });
+    await lifetime.selectOption('year');
+    const yearlyExpiry = await expiryInput.inputValue();
+    const yearlyDuration = await expiryInput.evaluate(input => new Date(input.value.replace(' ', 'T')).getTime() - Date.now());
+    expect(yearlyDuration).toBeGreaterThan(365 * 86400000 - 65000);
+    expect(yearlyDuration).toBeLessThanOrEqual(366 * 86400000);
+    await expect(lifetime.locator('option:checked')).toHaveText(/^1 year \(/);
+    await lifetime.click();
+    await page.screenshot({ path: 'test-results/admin-expiration-menu.png' });
+    await page.keyboard.press('Escape');
+    await page.screenshot({ path: 'test-results/admin-token-presets.png' });
+    await page.getByRole('button', { name: 'Create token', exact: true }).click();
+    await expect(page.locator('#value-text')).toHaveValue(/^dv1_[A-Za-z0-9_-]{60}$/);
+    await expect(page.locator('#value-type-label')).toBeHidden();
+    await page.getByRole('button', { name: 'Close', exact: true }).click();
+    await expect(page.locator('#value-text')).toHaveValue('');
+    const tokenRow = page.locator('#token-list article').filter({ hasText: 'Payments service' });
+    await expect(page.locator('#token-count')).toHaveText(String(Number(initialTokenCount) + 1));
+    page.once('dialog', dialog => dialog.accept()); await tokenRow.getByRole('button', { name: 'Revoke', exact: true }).click();
+    await expect(tokenRow).toHaveCount(0);
+    await expect(page.locator('#token-count')).toHaveText(initialTokenCount);
+    await expect(page.locator('#revoked-token-count')).toHaveText('1');
+    await expect(page.locator('#token-buckets').getByLabel(name, { exact: true })).toBeChecked();
+    await page.locator('#token-archive summary').click();
+    const archivedRow = page.locator('#revoked-token-list article').filter({ hasText: 'Payments service' });
+    await expect(archivedRow).toContainText('Revoked:');
+    await expect(archivedRow.getByRole('button', { name: 'Revoke', exact: true })).toHaveCount(0);
+    const formattedExpiry = await page.evaluate(value => new Date(value.replace(' ', 'T')).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' }), yearlyExpiry);
+    await expect(archivedRow).toContainText(formattedExpiry);
+    await page.screenshot({ path: 'test-results/admin-tokens.png' });
+  });
+
+  await test.step('Filter activity logs', async () => {
+    await nav.getByRole('link', { name: 'Activity logs', exact: true }).click();
+    await expect(page).toHaveURL(/\/admin\/logs$/);
+    await expect(nav.getByRole('link', { name: 'Activity logs', exact: true })).toHaveAttribute('aria-current', 'page');
+    const eventType = page.getByLabel('Event type', { exact: true });
+    await expect(eventType).toHaveCSS('appearance', 'base-select');
+    await eventType.click();
+    await page.screenshot({ path: 'test-results/admin-select.png' });
+    await page.getByRole('option', { name: 'Operations', exact: true }).click();
+    await expect(eventType).toHaveValue('operation');
+    await eventType.focus();
+    await page.keyboard.press('Space');
+    await page.keyboard.press('ArrowDown');
+    await page.keyboard.press('Enter');
+    await expect(eventType).toHaveValue('http');
+    await page.getByLabel('Search logs', { exact: true }).fill('payments_production');
+    await page.getByLabel('Event type', { exact: true }).selectOption('operation');
+    await page.getByRole('button', { name: 'Apply filters', exact: true }).click();
+    await expect(page).toHaveURL('/admin/logs?search=payments_production&kind=operation');
+    await expect(page.locator('#audit-list')).toContainText('secret.update');
+    await expect(page.locator('#audit-list')).not.toContainText('browser-secret-秘密');
+    await page.reload();
+    await expect(page.getByLabel('Search logs', { exact: true })).toHaveValue('payments_production');
+    await expect(page.getByLabel('Event type', { exact: true })).toHaveValue('operation');
+    await expect(page.locator('#audit-list')).toContainText('secret.update');
+    await page.locator('#audit-list button').first().click();
+    await expect(page.locator('.log-details').first()).toBeVisible();
+    await expect(page.locator('.log-details').first()).toContainText('Trace ID');
+    await page.locator('#audit-list button').first().click();
+    await page.screenshot({ path: 'test-results/admin-logs.png' });
+    await page.getByLabel('Search logs', { exact: true }).fill('no-event-matches-this-string');
+    await page.getByRole('button', { name: 'Apply filters', exact: true }).click();
+    await expect(page.locator('#audit-empty')).toBeVisible();
+    await page.goBack();
+    await expect(page.locator('#audit-list')).toContainText('secret.update');
+    await page.setViewportSize({ width: 390, height: 844 });
+    await expect(page.getByRole('button', { name: 'Apply filters', exact: true })).toBeVisible();
+    await expect(nav.getByRole('link', { name: 'Settings', exact: true })).toBeInViewport();
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+    await page.screenshot({ path: 'test-results/admin-mobile.png' });
+    await page.setViewportSize({ width: 1440, height: 1000 });
+  });
+
+  await test.step('Change the password, sign out offline and lose the session', async () => {
+    await nav.getByRole('link', { name: 'Settings', exact: true }).click();
+    await expect(page).toHaveURL(/\/admin\/settings$/);
+    const settingsHeading = await page.getByRole('heading', { name: 'Security settings', exact: true }).boundingBox();
+    const passkeysHeading = await page.getByRole('heading', { name: 'Passkeys', exact: true }).boundingBox();
+    expect(passkeysHeading.y).toBeGreaterThan(settingsHeading.y + settingsHeading.height);
+    await page.screenshot({ path: 'test-results/admin-settings.png' });
+    await page.getByLabel('Current password', { exact: true }).fill('acceptance-test-password-only');
+    await page.getByLabel('New password', { exact: true }).fill('acceptance-test-password-updated');
+    await page.getByRole('button', { name: 'Change password and sign out', exact: true }).click();
+    await expect(page.locator('#login')).toBeVisible();
+    await page.getByLabel('Password', { exact: true }).fill('acceptance-test-password-updated');
+    await page.getByRole('button', { name: 'Sign in', exact: true }).click();
+    await expect(page.locator('#password-view')).toBeVisible();
+    await page.context().setOffline(true);
+    await page.getByRole('button', { name: 'Sign out', exact: true }).click();
+    await expect(page.locator('#login')).toBeVisible();
+    await page.context().setOffline(false);
+    await page.context().clearCookies();
+    await page.reload();
+    await expect(page.locator('#login')).toBeVisible();
+  });
+
+  await test.step('No page errors, CSP violations or plaintext requests', async () => {
+    expect(errors).toEqual([]);
+    expect(cspViolations).toEqual([]);
+    expect(sent.length).toBeGreaterThan(0);
+    // Every execute body must be a compact JWE with the request profile; its payload segment is ciphertext.
+    const headers = sent.map(body => JSON.parse(Buffer.from(body.split('.')[0], 'base64url').toString('utf8')));
+    expect(headers.every(header => header.alg === 'ECDH-ES' && header.enc === 'A256GCM' && header.typ === 'darkvault-request+jwe' && header.cty === 'application/json')).toBe(true);
+    expect(sent.every(body => body && body.split('.').length === 5 && body.split('.')[1] === '' && !body.includes('browser-secret') && !body.includes('updated'))).toBe(true);
+  });
 });

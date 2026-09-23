@@ -51,10 +51,12 @@ token scopes and bucket access. Reading an entire bucket needs `bucket:read`,
 token's allowed creation names. Token issuance and revocation are administrative
 operations, not SDK methods.
 
-Values are strings. Treat returned secrets as sensitive in-memory data; do not
-log values, Authorization headers, or request bodies. TLS verification must stay
-enabled. JWE uses ECDH-ES/P-256/A256GCM in addition to HTTPS; the server still sees
-plaintext secrets, so this is not a zero-knowledge system.
+Basic bucket reads expose string values. Typed-secret and configuration APIs preserve
+JSON scalar types (`string`, `number`, `boolean`, and `null`); use them when loading
+application settings. Treat returned values as sensitive in-memory data; do not log
+values, Authorization headers, or request bodies. TLS verification must stay enabled.
+JWE uses ECDH-ES/P-256/A256GCM in addition to HTTPS; the server still sees plaintext
+secrets, so this is not a zero-knowledge system.
 
 ## Constructor and cancellation
 
@@ -111,10 +113,12 @@ The final optional `signal?: AbortSignal` is omitted from the table.
 | `listBuckets(cursor = null, limit = 100)` | `Page<Bucket>` |
 | `readBucket(bucket)` | `Record<string, string>` |
 | `readBucketSnapshot(bucket)` | `BucketSnapshot` |
+| `readTypedBucket(bucket)` | `Record<string, SecretScalar>` with typed values |
 | `updateBucket(bucket, description, expectedRevision)` | `Bucket` |
 | `deleteBucket(bucket, expectedRevision, recursive = false)` | `void` |
 | `addSecret(bucket, key, value)` | `SecretMetadata` |
 | `readSecret(bucket, key)` | `Secret` |
+| `readTypedSecret(bucket, key)` | `Secret` with a typed `SecretScalar` value |
 | `listSecrets(bucket, cursor = null, limit = 100)` | `Page<SecretMetadata>` |
 | `updateSecret(bucket, key, value, expectedRevision)` | `SecretMetadata` |
 | `setSecret(bucket, key, value, expectedRevision = 0)` | `SecretMetadata` |

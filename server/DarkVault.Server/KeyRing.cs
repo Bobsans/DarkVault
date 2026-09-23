@@ -2,7 +2,6 @@ using System.Security.Cryptography;
 using System.Security.AccessControl;
 using System.Security.Principal;
 using System.Text;
-using DarkVault.Client;
 
 namespace DarkVault.Server;
 
@@ -11,6 +10,11 @@ public sealed class KeyRing : IDisposable {
     private readonly object gate = new();
     private Ring state;
     private readonly byte[]? wrappingKey;
+    private const long MaxDataKeyUses = 1 << 20;
+    private const long DataUseReservation = 1024;
+    private string? reservedDataKey;
+    private long nextReservedUse;
+    private long reservedUntil;
     public string ServerId => state.ServerId;
     public KeyRing(string path, bool create, byte[]? wrappingKey = null) {
         this.path = Path.GetFullPath(path);
@@ -110,7 +114,7 @@ public sealed class KeyRing : IDisposable {
             var active = state.Transport[^1];
             using var ec = Load(active.PrivateKey);
             return new(1, state.ServerId, DateTimeOffset.UtcNow, active.Id, Wire.Export(ec), active.NotAfter,
-                new DarkVault.Client.TransportLimits(Wire.MaxBody, Wire.MaxPlaintext));
+                new TransportLimits(Wire.MaxBody, Wire.MaxPlaintext));
         }
     }
     public string DecryptRequest(string compact) {
@@ -129,9 +133,22 @@ public sealed class KeyRing : IDisposable {
         lock (gate) {
             var index = state.Data.FindIndex(k => k.Id == state.ActiveData);
             if (index < 0) throw new CryptographicException("Keyring has no valid active data key.");
-            if (state.Data[index].Uses >= 1 << 20) { RotateData(); index = state.Data.Count - 1; }
+            var active = state.Data[index];
+            if (active.Uses >= MaxDataKeyUses && (reservedDataKey != active.Id || nextReservedUse >= reservedUntil)) {
+                RotateData(); index = state.Data.Count - 1; active = state.Data[index];
+            }
+            if (reservedDataKey != active.Id) {
+                reservedDataKey = active.Id; nextReservedUse = active.Uses; reservedUntil = active.Uses;
+            }
+            if (nextReservedUse >= reservedUntil) {
+                var reservedTo = Math.Min(MaxDataKeyUses, active.Uses + DataUseReservation);
+                state.Data[index] = active with { Uses = reservedTo };
+                try { Save(); } catch { state.Data[index] = active; throw; }
+                reservedUntil = reservedTo; nextReservedUse = active.Uses;
+            }
+            // Persist a high-water mark before use; after a crash the unused tail is skipped, never reused.
+            nextReservedUse++;
             var key = state.Data[index];
-            state.Data[index] = key with { Uses = key.Uses + 1 }; Save();
             var nonce = RandomNumberGenerator.GetBytes(12); var tag = new byte[16];
             var plain = Encoding.UTF8.GetBytes(value); var cipher = new byte[plain.Length];
             var bytes = Convert.FromBase64String(key.Key);

@@ -70,7 +70,7 @@ def unbase64(value: str) -> bytes:
 
 
 def public_key(value: Any) -> jwk.JWK:
-    if not isinstance(value, dict) or set(value) != {"kty", "crv", "x", "y"}:
+    if not isinstance(value, dict) or not {"kty", "crv", "x", "y"}.issubset(value) or {"d", "p", "q", "dp", "dq", "qi", "oth"}.intersection(value):
         raise ValueError("Invalid public key fields")
     if value["kty"] != "EC" or value["crv"] != "P-256":
         raise ValueError("Unsupported public key")
@@ -85,7 +85,8 @@ def encrypt(payload: dict[str, Any], recipient: jwk.JWK, kid: str, kind: str) ->
     header = {"alg": "ECDH-ES", "enc": "A256GCM", "kid": kid, "typ": kind, "cty": "application/json"}
     token = jwe.JWE(dumps(payload), protected=dumps(header).decode("utf-8"), algs=ALGORITHMS)
     token.add_recipient(recipient)
-    result = token.serialize(compact=True).encode("ascii")
+    serialized = token.serialize(compact=True)
+    result: bytes = serialized.encode("ascii")
     if len(result) > MAX_BODY:
         raise ValueError("Payload too large")
     return result

@@ -26,8 +26,9 @@ Node 22+ и pnpm 11 нужны для сборки, но не для запус�
 `dotnet build` и `dotnet publish` собирают TypeScript SDK и SPA из `admin/`, затем
 включают HTML, CSS и JavaScript в выходной `wwwroot/`. Библиотеки JOSE входят
 в bundle; CDN и отдельный frontend-сервер не нужны. `admin/dist/` не коммитится.
-Команда генерации схем:
-`python tools/generate-contract.py`.
+При текущем готовом `admin/dist/` серверную итерацию можно собрать без вызова pnpm:
+`dotnet build server/DarkVault.Server/DarkVault.Server.csproj -p:SkipAdminBuild=true`.
+Команда генерации схем: `python tools/generate-contract.py`.
 
 Для публикации без установленного .NET используйте профиль `NativeAot`;
 команды и требования toolchain описаны в [verification.md](verification.md#native-aot).
@@ -55,7 +56,7 @@ CLI bootstrap требует локальный интерактивный те�
 ## Docker-образ
 
 Релизный Native AOT-образ публикуется в Docker Hub для Linux `amd64` и `arm64`.
-Он запускается от non-root пользователя и хранит только рабочие данные в `/data`.
+Он запускается от non-root пользователя, оставляет `/app` только для чтения, проверяет `/health/ready` и хранит рабочие данные в `/data`.
 Путь образа собирается workflow из secret `DOCKERHUB_USERNAME`:
 `docker.io/<DOCKERHUB_USERNAME>/darkvault`. В командах ниже используется namespace
 этого репозитория; для форка или своего аккаунта подставьте собственный.
@@ -72,13 +73,14 @@ docker run --rm -it `
 docker run --detach --name darkvault `
   --publish 127.0.0.1:8866:8866 `
   --mount source=darkvault-data,target=/data `
+  --env DARKVAULT_TRUSTED_PROXIES=172.17.0.1 `
+  --env DARKVAULT_PUBLIC_ORIGIN=https://vault.example.com `
   docker.io/bobsans/darkvault:2.1.0 serve
 ```
 
 После bootstrap запускайте тот же образ с томом `/data`. В образе уже задано
 `ASPNETCORE_URLS=http://0.0.0.0:8866`; внешний HTTPS должен завершаться на reverse proxy.
-Не открывайте порт контейнера публично без TLS и задайте `DARKVAULT_TRUSTED_PROXIES`
-для адреса proxy.
+Не открывайте порт контейнера публично без TLS. Укажите адрес Docker bridge gateway в `DARKVAULT_TRUSTED_PROXIES`; узнайте его через `docker network inspect bridge` или задайте фиксированный gateway в собственной Docker network. `DARKVAULT_PUBLIC_ORIGIN` должен совпадать с внешним HTTPS origin.
 
 `DARKVAULT_KEYRING_KEY_FILE`, если используется, монтируйте отдельным read-only-файлом
 вне `/data`; секреты не входят в образ.

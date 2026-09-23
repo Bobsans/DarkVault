@@ -147,6 +147,48 @@ func TestConfiguredTimeoutCoversDiscoveryAndExecute(t *testing.T) {
 	}
 }
 
+func TestErrorsKeepTheirCause(t *testing.T) {
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, err := json.Marshal(testServerKey(key))
+	if err != nil {
+		t.Fatal(err)
+	}
+	newClient := func(transport roundTripFunc) *Client {
+		c, err := New("https://vault.example.com", "dv1_"+strings.Repeat("A", 60))
+		if err != nil {
+			t.Fatal(err)
+		}
+		c.HTTP.Transport = transport
+		return c
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	canceled := newClient(func(r *http.Request) (*http.Response, error) { return nil, r.Context().Err() })
+	if _, err = canceled.GetTokenInfo(ctx); !errors.Is(err, context.Canceled) {
+		t.Fatalf("discovery lost cancellation: %v", err)
+	}
+	throttled := newClient(func(r *http.Request) (*http.Response, error) {
+		return &http.Response{StatusCode: 429, Header: http.Header{"Content-Type": {"application/json"}, "Retry-After": {"3"}}, Body: io.NopCloser(strings.NewReader(`{"error":{"code":"rate_limited"}}`)), Request: r}, nil
+	})
+	var api *APIError
+	if _, err = throttled.GetTokenInfo(context.Background()); !errors.As(err, &api) || api.Code != "rate_limited" || api.Status != 429 || api.RetryAfter != 3*time.Second {
+		t.Fatalf("discovery lost rate limit metadata: %v", err)
+	}
+	cause := errors.New("connection reset")
+	unknown := newClient(func(r *http.Request) (*http.Response, error) {
+		if strings.HasSuffix(r.URL.Path, "/crypto/key") {
+			return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(string(body))), Header: make(http.Header), Request: r}, nil
+		}
+		return nil, cause
+	})
+	if _, err = unknown.AddBucket(context.Background(), "qa", ""); !errors.Is(err, cause) || !strings.Contains(err.Error(), "outcome unknown") {
+		t.Fatalf("write lost its transport cause: %v", err)
+	}
+}
+
 func TestDotNetJWEFixture(t *testing.T) {
 	b, e := os.ReadFile("testdata/jwe.json")
 	if e != nil {

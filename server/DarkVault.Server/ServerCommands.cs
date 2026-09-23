@@ -2,23 +2,33 @@ using System.Security.AccessControl;
 using System.Security.Principal;
 using System.Security.Cryptography;
 using System.Text;
-using DarkVault.Client;
 
 namespace DarkVault.Server;
 
 public static class ServerCommands {
+    internal static string InformationalVersion => typeof(ServerCommands).Assembly.GetCustomAttributes(typeof(System.Reflection.AssemblyInformationalVersionAttribute), false)
+        .Cast<System.Reflection.AssemblyInformationalVersionAttribute>().Single().InformationalVersion;
+
     public static async Task<int> RunAsync(string[] args) {
         try {
             if (args is ["--version"]) {
-                Console.WriteLine(typeof(ServerCommands).Assembly.GetCustomAttributes(typeof(System.Reflection.AssemblyInformationalVersionAttribute), false)
-                    .Cast<System.Reflection.AssemblyInformationalVersionAttribute>().Single().InformationalVersion);
+                Console.WriteLine(InformationalVersion);
                 return 0;
+            }
+            if (args is ["healthcheck"]) {
+                using var client = new HttpClient { Timeout = TimeSpan.FromSeconds(2) };
+                // Probe the first plain-HTTP listener; the container image binds http://0.0.0.0:8866 by default.
+                var listener = (Environment.GetEnvironmentVariable("ASPNETCORE_URLS") ?? "").Split(';', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries)
+                    .Select(u => System.Text.RegularExpressions.Regex.Match(u, @"\Ahttp://[^/]*:(\d{1,5})/?\z")).FirstOrDefault(m => m.Success);
+                var port = listener?.Groups[1].Value ?? "8866";
+                using var response = await client.GetAsync($"http://127.0.0.1:{port}/health/ready");
+                return response.IsSuccessStatusCode ? 0 : 1;
             }
             if (args.Contains("--help")) {
                 Console.WriteLine("""
                     DarkVault
                     --version prints the build version and commit without opening the data directory.
-                    Commands: serve (default), bootstrap, reset-password, reset-mfa, verify, rotate-data,
+                    Commands: serve (default), healthcheck, bootstrap, reset-password, reset-mfa, verify, rotate-data,
                       rotate-transport [--emergency], backup <new-directory>,
                       create-wrapping-key <new-file>, protect-keyring
                     DARKVAULT_DATA: private directory (default: ./data)

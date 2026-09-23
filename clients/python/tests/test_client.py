@@ -3,6 +3,7 @@ import json
 import http.client
 import os
 from pathlib import Path
+import socket
 import ssl
 import time
 import unittest
@@ -194,8 +195,36 @@ class ClientTests(unittest.TestCase):
         with patch.object(self.client, "_http", side_effect=response):
             self.assertEqual(self.client.read_bucket("qa"), self.data["secrets"])
         self.assertEqual(posts, 3)
-        with self.assertRaises(TimeoutError):
-            self.client._pause({"retry-after": "3600"}, 0, time.monotonic() + 1)
+        self.assertFalse(self.client._pause({"retry-after": "3600"}, 0, time.monotonic() + 1))
+        def throttled(method, path, body, deadline):
+            if method == "POST":
+                return 429, {"retry-after": "3600"}, b'{"error":{"code":"rate_limited"}}'
+            return self.respond(method, path, body, deadline)
+        with patch.object(self.client, "_http", side_effect=throttled), self.assertRaises(DarkVaultError) as raised:
+            self.client.read_bucket("qa")
+        self.assertEqual((raised.exception.code, raised.exception.status, raised.exception.retry_after), ("rate_limited", 429, 3600.0))
+
+    def test_discovery_failures_retry_for_writes_but_sent_writes_do_not(self):
+        self.data = {"id": str(uuid4()), "name": "qa", "description": "", "revision": 1, "createdAt": self.now(), "updatedAt": self.now()}
+        calls = {"GET": 0, "POST": 0}
+        def flaky_discovery(method, path, body, deadline):
+            calls[method] += 1
+            if method == "GET" and calls["GET"] == 1:
+                raise ConnectionResetError()
+            return self.respond(method, path, body, deadline)
+        with patch.object(self.client, "_http", side_effect=flaky_discovery), patch("darkvault.client.time.sleep"):
+            self.assertEqual(self.client.add_bucket("qa")["name"], "qa")
+        self.assertEqual(calls, {"GET": 2, "POST": 1})
+        posts = 0
+        def failed_write(method, path, body, deadline):
+            nonlocal posts
+            if method == "POST":
+                posts += 1
+                raise ConnectionResetError()
+            return self.respond(method, path, body, deadline)
+        with patch.object(self.client, "_http", side_effect=failed_write), self.assertRaises(DarkVaultError) as raised:
+            self.client.add_bucket("qa")
+        self.assertEqual((raised.exception.code, posts), ("outcome_unknown", 1))
 
     def test_explicit_unknown_key_refreshes_once(self):
         posts = 0
@@ -225,11 +254,39 @@ class ClientTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             DarkVaultClient("https://vault.example.com", TOKEN, ssl_context=insecure)
 
-    def test_connection_close_after_complete_body(self):
+    def test_closed_keepalive_socket_is_detected(self):
+        from darkvault.client import _connection_dropped
+        local, remote = socket.socketpair()
+        with local, remote:
+            self.assertFalse(_connection_dropped(local))
+            remote.close()
+            self.assertTrue(_connection_dropped(local))
+
+    def test_recent_keepalive_closed_by_server_is_replaced_before_writing(self):
+        old_connection = Mock(sock=Mock())
+        new_connection, response = Mock(sock=Mock()), Mock()
+        response.status, response.length = 200, 0
+        response.isclosed.return_value = True
+        response.getheader.return_value = "identity"
+        response.getheaders.return_value = []
+        new_connection.getresponse.return_value = response
+        self.client._connection = old_connection
+        self.client._connection_used_at = time.monotonic()
+        with patch("darkvault.client.http.client.HTTPSConnection", return_value=new_connection), \
+                patch("darkvault.client._connection_dropped", return_value=True) as dropped:
+            self.client._http("POST", "/api/v1/execute", b"request", time.monotonic() + 1)
+        dropped.assert_called_once_with(old_connection.sock)
+        old_connection.close.assert_called_once()
+        old_connection.request.assert_not_called()
+        new_connection.request.assert_called_once()
+
+    @patch("darkvault.client._connection_dropped", return_value=False)
+    def test_connection_close_after_complete_body(self, _dropped):
         connection, response, socket = Mock(), Mock(), Mock()
         connection.sock = socket
         connection.getresponse.return_value = response
         self.client._connection = connection
+        self.client._connection_used_at = time.monotonic()
         response.getheader.return_value = "identity"
         response.getheaders.return_value = [("Content-Type", "application/json")]
         response.status, response.length = 200, 2
@@ -245,11 +302,29 @@ class ClientTests(unittest.TestCase):
         self.assertEqual(response.read1.call_count, 1)
         self.assertNotIn("Authorization", connection.request.call_args.kwargs["headers"])
 
-    def test_transport_rejects_oversized_and_incomplete_bodies(self):
+    def test_idle_keepalive_is_recycled_before_next_request(self):
+        old_connection = Mock(sock=Mock())
+        new_connection, response = Mock(sock=Mock()), Mock()
+        response.status, response.length = 200, 0
+        response.isclosed.return_value = True
+        response.getheader.return_value = "identity"
+        response.getheaders.return_value = []
+        new_connection.getresponse.return_value = response
+        self.client._connection = old_connection
+        self.client._connection_used_at = 100.0
+        with patch("darkvault.client.http.client.HTTPSConnection", return_value=new_connection) as factory, patch("darkvault.client.time.monotonic", return_value=200.0):
+            self.client._http("POST", "/api/v1/execute", b"request", 300.0)
+        old_connection.close.assert_called_once()
+        factory.assert_called_once()
+        new_connection.request.assert_called_once()
+
+    @patch("darkvault.client._connection_dropped", return_value=False)
+    def test_transport_rejects_oversized_and_incomplete_bodies(self, _dropped):
         for length, expected in ((wire.MAX_BODY + 1, ValueError), (20, http.client.IncompleteRead)):
             connection, response = Mock(), Mock()
             connection.getresponse.return_value = response
             self.client._connection = connection
+            self.client._connection_used_at = time.monotonic()
             response.length = length
             response.getheader.return_value = "identity"
             response.isclosed.return_value = False

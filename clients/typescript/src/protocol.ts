@@ -4,6 +4,30 @@ import { CompactEncrypt, compactDecrypt, exportJWK, generateKeyPair, importJWK, 
 
 const encoder = new TextEncoder();
 const maxBody = 2 * 1024 * 1024;
+export type ServerKey = { protocolVersion: number; serverId: string; serverTime: string; kid: string; publicKey: JWK; notAfter: string; limits: { maxBodyBytes: number; maxPlaintextBytes: number } };
+export function validateServerKey(value: unknown): ServerKey {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new DarkVaultError('invalid_server_key');
+  const key = value as Record<string, unknown>;
+  const limits = key.limits as Record<string, unknown> | null;
+  const publicKey = key.publicKey as Record<string, unknown> | null;
+  const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  // Unknown fields are ignored, as in the other SDKs, so protocol v1 can add key metadata.
+  if (!['kid', 'limits', 'notAfter', 'protocolVersion', 'publicKey', 'serverId', 'serverTime'].every(field => field in key) || key.protocolVersion !== 1 || typeof key.serverId !== 'string' || !uuid.test(key.serverId) || typeof key.kid !== 'string' || !uuid.test(key.kid) || typeof key.serverTime !== 'string' || !Number.isFinite(Date.parse(key.serverTime)) || typeof key.notAfter !== 'string' || !Number.isFinite(Date.parse(key.notAfter)) || Date.parse(key.notAfter) <= Date.now() || !limits || !Number.isSafeInteger(limits.maxBodyBytes) || (limits.maxBodyBytes as number) < 1 || (limits.maxBodyBytes as number) > maxBody || !Number.isSafeInteger(limits.maxPlaintextBytes) || (limits.maxPlaintextBytes as number) < 1 || (limits.maxPlaintextBytes as number) > 1536 * 1024 || !publicKey || publicKey.kty !== 'EC' || publicKey.crv !== 'P-256' || ['d', 'p', 'q', 'dp', 'dq', 'qi', 'oth'].some(field => field in publicKey)) throw new DarkVaultError('invalid_server_key');
+  return key as unknown as ServerKey;
+}
+export function parsePlainError(text: string): string {
+  try {
+    const value = parseStrict(text) as { error?: { code?: unknown } };
+    return typeof value?.error?.code === 'string' && /^[a-z_]{1,64}$/.test(value.error.code) ? value.error.code : 'transport_error';
+  } catch { return 'transport_error'; }
+}
+export function retryAfterMs(value: string | null): number {
+  if (!value) return 0;
+  const seconds = Number(value);
+  if (Number.isFinite(seconds) && seconds >= 0) return Math.ceil(seconds * 1000);
+  const date = Date.parse(value);
+  return Number.isFinite(date) ? Math.max(0, date - Date.now()) : 0;
+}
 export function parseStrict(text: string) {
   if (encoder.encode(text).length > 1536 * 1024) throw new Error('JSON too large');
   const value = JSON.parse(text);

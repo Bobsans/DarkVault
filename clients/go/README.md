@@ -65,10 +65,12 @@ token scopes and bucket access. Reading an entire bucket needs `bucket:read`,
 token's allowed creation names. Token issuance and revocation are administrative
 operations, not SDK methods.
 
-Values are strings. Treat returned secrets as sensitive in-memory data; do not
-log values, Authorization headers, or request bodies. TLS verification must stay
-enabled. JWE uses ECDH-ES/P-256/A256GCM in addition to HTTPS; the server still sees
-plaintext secrets, so this is not a zero-knowledge system.
+Basic bucket reads expose string values. Typed-secret and configuration APIs preserve
+JSON scalar types (`string`, `number`, `boolean`, and `null`); use them when loading
+application settings. Treat returned values as sensitive in-memory data; do not log
+values, Authorization headers, or request bodies. TLS verification must stay enabled.
+JWE uses ECDH-ES/P-256/A256GCM in addition to HTTPS; the server still sees plaintext
+secrets, so this is not a zero-knowledge system.
 
 ## Required scopes
 
@@ -101,7 +103,10 @@ All methods below take `ctx context.Context` as their first argument. They retur
 | `ListBuckets(cursor, limit)` | `Page[Bucket]` |
 | `ReadBucket(bucket)` | `map[string]string` |
 | `ReadBucketSnapshot(bucket)` | `BucketSnapshot` |
+| `ReadTypedBucket(bucket)` | `map[string]any` with typed values |
+| `ReadConfiguration(bucket, target)` | Error only; decodes nested configuration into `target` |
 | `UpdateBucket(bucket, description, expectedRevision)` | `Bucket` |
+| `RenameBucket(bucket, name, expectedRevision)` | `Bucket` |
 | `DeleteBucket(bucket, expectedRevision, recursive)` | Error only |
 | `AddSecret(bucket, key, value)` | `SecretMetadata` |
 | `ReadSecret(bucket, key)` | `Secret` |
@@ -110,7 +115,11 @@ All methods below take `ctx context.Context` as their first argument. They retur
 | `SetSecret(bucket, key, value, expectedRevision)` | `SecretMetadata` |
 | `DeleteSecret(bucket, key, expectedRevision)` | Error only |
 | `GetTokenInfo()` | `TokenInfo` |
+| `AddTypedSecret(bucket, key, value)` | `SecretMetadata`; `value` is a string, number, boolean or nil |
+| `UpdateTypedSecret(bucket, key, value, expectedRevision)` | `SecretMetadata` |
+| `SetTypedSecret(bucket, key, value, expectedRevision)` | `SecretMetadata` |
 | `Execute(operation, parameters)` | `json.RawMessage`; advanced wire API |
+| `ExecuteValidated(operation, parameters)` | `json.RawMessage` checked against the operation's result schema |
 
 Names, keys, values, descriptions, and cursors are strings; revisions are `int64`,
 limits are `int`, and `recursive` is `bool`. Go has no optional method arguments:

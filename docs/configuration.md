@@ -15,9 +15,7 @@
 {"bucket":"app","key":"Redis:Port","value":"6379","type":"number"}
 ```
 
-`type` необязателен в secret.create/update/set; отсутствие означает `string`,
-в том числе при обновлении. Для сохранения типа используйте типизированный метод
-или передавайте type явно. secret.read/list и ответы записи возвращают type в metadata.
+`type` необязателен в secret.create/update/set. Для create отсутствие означает `string`; для update/set сохраняется текущий тип секрета. Чтобы сменить тип, передайте `type` явно. secret.read/list и ответы записи возвращают type в metadata.
 `bucket.read` возвращает `secrets` со строковыми представлениями и разреженный
 словарь `types`: отсутствующий в types ключ означает string.
 
@@ -82,8 +80,9 @@ SetTypedSecret с scalar-аргументом. Строковые методы C
 
 .NET IConfiguration получает строковые числа/boolean для штатного binding и null
 для типа null. Его native-разделитель `:` и нечувствительность к регистру сохраняются;
-коллизии регистра отклоняются. Для переносимого дерева с escape-последовательностями
-и типизированного JSON binding используйте ReadConfigurationAsync<T>.
+коллизии регистра отклоняются. Обратная косая черта — обычный символ ключа,
+а не escape-разделитель. Для портативного дерева с escape-путями и типизированным
+JSON binding используйте ReadConfigurationAsync<T>.
 
 CLI читает значения из stdin/скрытого ввода; `secret add/update/set --type number`
 задаёт тип. `bucket read --format json` сохраняет wire snapshot со строками и types.

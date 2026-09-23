@@ -34,6 +34,7 @@ schemas = {
     "Error": obj({"code": S, "message": S}),
     "BucketSnapshot": obj({"bucketId": UUID, "revision": REV, "secrets": {"type": "object", "additionalProperties": S}, "types": {"type": "object", "additionalProperties": SECRET_TYPE, "description": "Sparse type map; missing keys are string."}}),
     "CryptoKey": obj({"protocolVersion": {"const": 1}, "serverId": UUID, "serverTime": DATE, "kid": UUID, "publicKey": ref("PublicKey"), "notAfter": DATE, "limits": obj({"maxBodyBytes": REV, "maxPlaintextBytes": REV})}),
+    "Health": obj({"status": {"const": "ready"}}),
     "JweCompact": {"type": "string", "maxLength": 2097152, "description": "ECDH-ES/P-256/A256GCM compact JWE; plaintext schemas below are not sent unencrypted.", "pattern": "^[A-Za-z0-9_-]+\\.\\.[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]*\\.[A-Za-z0-9_-]+$"},
     "PageParameters": obj({"cursor": nullable(S), "limit": {"type": "integer", "minimum": 1, "maximum": 200}}, []),
 }
@@ -99,7 +100,9 @@ def execute(admin):
 
 paths = {"/api/v1/execute": execute(False), "/admin/api/v1/execute": execute(True),
     "/api/v1/crypto/key": {"get": {"operationId": "getCryptoKey", "responses": {"200": {"description": "Current server public key", "content": {"application/json": {"schema": ref("CryptoKey")}}}}}},
-    "/admin/api/v1/session": {"get": {"operationId": "getAdminSession", "responses": {"200": {"description": "Authentication state and CSRF token", "content": {"application/json": {"schema": obj({"authenticated": BOOL, "csrfToken": S})}}}}}}}
+    "/admin/api/v1/session": {"get": {"operationId": "getAdminSession", "responses": {"200": {"description": "Authentication state and CSRF token", "content": {"application/json": {"schema": obj({"authenticated": BOOL, "csrfToken": S, "serverVersion": nullable(S)})}}}}}},
+    "/health/ready": {"get": {"operationId": "readiness", "responses": {"200": {"description": "Ready", "content": {"application/json": {"schema": ref("Health")}}}}}},
+    "/metrics": {"get": {"operationId": "metrics", "responses": {"200": {"description": "Low-cardinality Prometheus metrics", "content": {"text/plain": {"schema": S}}}, "404": {"description": "Not a direct loopback request"}}}}}
 for name, fields in {"login": {"username": S, "password": S, "recoveryCode": nullable(S)}, "logout": {}, "password": {"currentPassword": S, "newPassword": S}}.items():
     paths["/admin/" + name] = {"post": {"operationId": "admin" + name.title(), "security": [{"Csrf": []}] if name == "login" else [{"AdminSession": [], "Csrf": []}], "requestBody": {"required": True, "content": {"application/json": {"schema": obj(fields)}}}, "responses": {"200": {"description": "Completed"}, "400": {"description": "Invalid input or CSRF"}, "401": {"description": "Authentication required"}}}}
 paths["/admin/login"]["post"]["requestBody"]["content"]["application/json"]["schema"]["required"] = ["username", "password"]
@@ -111,7 +114,9 @@ for name in ["options", "register", "verify"]:
         "responses": {"200": {"description": "Administrative session and one-time recovery codes" if name == "verify" else "WebAuthn options", "content": {"application/json": {"schema": obj({"authenticated": BOOL, "recoveryCodes": array(S)}) if name == "verify" else obj({"authenticated": BOOL, "mode": {"enum": ["register", "verify"]}, "options": {"type": "object"}})}}}, "401": {"description": "Invalid authentication or expired/consumed challenge"}, "403": {"description": "Recent MFA required"}}}}
 for path in paths.values():
     for operation in path.values():
-        operation["responses"]["429"] = {"description": "Application quota or temporary source ban", "headers": {"Retry-After": {"schema": {"type": "integer", "minimum": 1}, "description": "Seconds before retrying; never blindly retry mutations."}}}
+        for response in operation["responses"].values():
+            response.setdefault("headers", {})["X-Request-Id"] = {"schema": S, "description": "Request correlation ID; matches audit traceId."}
+        operation["responses"]["429"] = {"description": "Application quota or temporary source ban", "headers": {"Retry-After": {"schema": {"type": "integer", "minimum": 1}, "description": "Seconds before retrying; never blindly retry mutations."}, "X-Request-Id": {"schema": S, "description": "Request correlation ID; matches audit traceId."}}}
 schemas["token.create.Request"]["properties"]["parameters"]["properties"]["expiresAt"]["description"] = "Omitted or null: 30 days. Explicit expiry must be in the future and no later than the same UTC date and time next year (February 29 becomes February 28)."
 document = {"openapi": "3.1.0", "info": {"title": "DarkVault", "version": "1.0.0", "description": "HTTPS is mandatory. See protocol.md for JWE and authorization requirements."}, "paths": paths,
     "components": {"securitySchemes": {"BearerToken": {"type": "http", "scheme": "bearer"}, "AdminSession": {"type": "apiKey", "in": "cookie", "name": "__Secure-DarkVault"}, "Csrf": {"type": "apiKey", "in": "header", "name": "X-CSRF-Token"}}, "schemas": schemas}}

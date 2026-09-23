@@ -64,6 +64,25 @@ test('Transport rejects plaintext errors without sending tokens to discovery', a
     await assert.rejects(client.getTokenInfo(), error => error instanceof DarkVaultError && error.code === 'key_unavailable' && !error.message.includes('private text'));
 });
 
+test('Execute transport failures after send are reported as unknown outcomes with their cause', async () => {
+    const { generateKeyPair, exportJWK } = await import('jose');
+    const pair = await generateKeyPair('ECDH-ES', { crv: 'P-256', extractable: true });
+    const serverKey = {
+        protocolVersion: 1, serverId: '00000000-0000-4000-8000-000000000001', kid: '00000000-0000-4000-8000-000000000002',
+        publicKey: await exportJWK(pair.publicKey), serverTime: new Date().toISOString(), notAfter: new Date(Date.now() + 300000).toISOString(),
+        limits: { maxBodyBytes: 2 * 1024 * 1024, maxPlaintextBytes: 1536 * 1024 }
+    };
+    let calls = 0;
+    const client = new DarkVaultClient('vault.example.com', token, { fetch: async url => {
+        if (url.endsWith('/crypto/key')) return new Response(JSON.stringify(serverKey), { status: 200, headers: { 'Content-Type': 'application/json' } });
+        calls++;
+        throw new DOMException('connection timed out', 'AbortError');
+    } });
+    await assert.rejects(client.updateSecret('qa', 'key', 'value', 1), error =>
+        error instanceof DarkVaultError && error.code === 'request_outcome_unknown' && error.cause?.name === 'AbortError');
+    assert.equal(calls, 1);
+});
+
 test('Caches server keys and preserves plaintext error metadata', async () => {
     const { generateKeyPair, exportJWK } = await import('jose');
     const pair = await generateKeyPair('ECDH-ES', { crv: 'P-256', extractable: true });
@@ -122,9 +141,43 @@ test('Page elements are validated against the single-record schema', async () =>
         return new Response(body, { status: 200, headers: { 'Content-Type': 'application/jose' } });
     } }).listBuckets();
     assert.deepEqual((await page([complete])).items, [complete]);
-    for (const items of [[{ ...complete, id: undefined }], [{ ...complete, revision: null }], ['not-an-object']]) {
+    const wrongTypes = [{ ...complete, name: 5 }, { ...complete, revision: '1' }, { ...complete, revision: -1 }, { ...complete, revision: 1.5 }, { ...complete, createdAt: 'not-a-date' }, { ...complete, description: null }];
+    for (const items of [[{ ...complete, id: undefined }], [{ ...complete, revision: null }], ['not-an-object'], ...wrongTypes.map(item => [item])]) {
         await assert.rejects(page(items), error => error instanceof DarkVaultError && error.code === 'invalid_response');
     }
+});
+
+test('Transport protections reject unsafe responses with stable codes', async () => {
+    const { generateKeyPair, exportJWK } = await import('jose');
+    const pair = await generateKeyPair('ECDH-ES', { crv: 'P-256', extractable: true });
+    const serverKey = {
+        protocolVersion: 1, serverId: '00000000-0000-4000-8000-000000000001', kid: '00000000-0000-4000-8000-000000000002',
+        publicKey: await exportJWK(pair.publicKey), serverTime: new Date().toISOString(), notAfter: new Date(Date.now() + 300000).toISOString(),
+        limits: { maxBodyBytes: 2 * 1024 * 1024, maxPlaintextBytes: 1536 * 1024 }
+    };
+    const json = (body, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
+    const redirected = (status) => { const response = new Response('', { status }); Object.defineProperty(response, 'redirected', { value: true }); return response; };
+    const privateKey = { ...serverKey.publicKey, d: 'AAAA' };
+    const cases = [
+        ['redirected discovery', () => redirected(200), 'redirect_rejected'],
+        ['foreign discovery origin', () => { const response = json(serverKey); Object.defineProperty(response, 'url', { value: 'https://evil.example.com/api/v1/crypto/key' }); return response; }, 'redirect_rejected'],
+        ['private key member', () => json({ ...serverKey, publicKey: privateKey }), 'invalid_server_key'],
+        ['expired key', () => json({ ...serverKey, notAfter: new Date(Date.now() - 1000).toISOString() }), 'invalid_server_key'],
+        ['oversized limits', () => json({ ...serverKey, limits: { maxBodyBytes: 3 * 1024 * 1024, maxPlaintextBytes: 1 } }), 'invalid_server_key'],
+        ['unencrypted success', url => url.endsWith('/crypto/key') ? json(serverKey) : json({ data: {} }), 'unencrypted_response'],
+        ['redirected execute', url => url.endsWith('/crypto/key') ? json(serverKey) : redirected(200), 'redirect_rejected']
+    ];
+    for (const [name, respond, code] of cases) {
+        const client = new DarkVaultClient('vault.example.com', token, { fetch: async url => respond(url) });
+        await assert.rejects(client.getTokenInfo(), error => error instanceof DarkVaultError && error.code === code, name);
+    }
+    const extra = new DarkVaultClient('vault.example.com', token, { fetch: async url => url.endsWith('/crypto/key') ? json({ ...serverKey, future: true }) : json({ error: { code: 'forbidden' } }, 403) });
+    await assert.rejects(extra.getTokenInfo(), error => error instanceof DarkVaultError && error.code === 'forbidden', 'unknown key fields are ignored');
+    const stalled = new DarkVaultClient('vault.example.com', token, { timeoutMs: 50, fetch: async (url, options) => {
+        if (url.endsWith('/crypto/key')) return json(serverKey);
+        return new Promise((_, reject) => options.signal.addEventListener('abort', () => reject(options.signal.reason)));
+    } });
+    await assert.rejects(stalled.getTokenInfo(), error => error instanceof DarkVaultError && error.code === 'timeout', 'read timeout');
 });
 
 // The verification gate requires the live run; without the flag a local run may still skip it.

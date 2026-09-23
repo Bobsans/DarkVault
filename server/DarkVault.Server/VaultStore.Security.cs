@@ -1,4 +1,3 @@
-using DarkVault.Client;
 using Microsoft.AspNetCore.Identity;
 
 namespace DarkVault.Server;

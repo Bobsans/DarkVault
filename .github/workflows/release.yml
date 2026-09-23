@@ -101,6 +101,8 @@ jobs:
 
       - name: Audit JavaScript and Python dependencies
         run: |
+          $PSNativeCommandUseErrorActionPreference = $true
+          $ErrorActionPreference = 'Stop'
           pnpm --dir clients/typescript audit --audit-level high
           pnpm --dir admin audit --audit-level high
           python -m pip install pip-audit==2.10.1
@@ -110,10 +112,12 @@ jobs:
     if: startsWith(github.ref, 'refs/tags/v')
     needs: check
     environment: release
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     permissions:
       contents: write
+      id-token: write
+      attestations: write
     concurrency:
       group: release-${{ github.ref }}
       cancel-in-progress: false
@@ -126,6 +130,11 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+          fetch-depth: 0
+      - name: Require release tag commit on main
+        run: |
+          git fetch origin main
+          git merge-base --is-ancestor HEAD origin/main
       - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
         with:
           dotnet-version: '10.0.401'
@@ -154,6 +163,10 @@ jobs:
         run: ./tools/package-release.ps1 -Tag $env:RELEASE_TAG -ServerAssets artifacts/native-assets
       - name: Verify release versions and checksums
         run: python tools/check-release.py "artifacts/releases/$env:RELEASE_TAG/assets" $env:RELEASE_TAG (git rev-parse HEAD)
+      - name: Attest release assets
+        uses: actions/attest@508db95dd578ae2727ebd6217d5ba78e4fbda05d # v4.2.1
+        with:
+          subject-path: artifacts/releases/${{ github.ref_name }}/assets/*
       - name: Preserve verified registry packages
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
@@ -179,7 +192,7 @@ jobs:
 
   publish-pypi:
     needs: release
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     environment: release
     permissions:
       contents: read
@@ -199,7 +212,7 @@ jobs:
 
   publish-nuget:
     needs: release
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     environment: release
     permissions:
       contents: read
@@ -236,7 +249,7 @@ jobs:
 
   publish-npm:
     needs: release
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     environment: release
     permissions:
       contents: read
@@ -260,7 +273,7 @@ jobs:
         run: node tools/publish-npm.mjs "packages/darkvault-client-${RELEASE_TAG#v}.tgz" "${RELEASE_TAG#v}"
   publish-container:
     needs: release
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     environment: release
     permissions:
       contents: read
@@ -281,6 +294,7 @@ jobs:
           path: artifacts/native-assets
       - name: Prepare container context from verified Linux servers
         run: |
+          $PSNativeCommandUseErrorActionPreference = $true
           $ErrorActionPreference = 'Stop'
           $root = (Get-Location).Path
           $context = Join-Path $root 'artifacts/container'

@@ -20,11 +20,12 @@ import (
 
 func Execute() int {
 	if e := Command().Execute(); e != nil {
-		fmt.Fprintln(os.Stderr, e)
+		// The child already reported its own failure; pass its status through unchanged.
 		var exit *exec.ExitError
 		if errors.As(e, &exit) {
-			return exit.ExitCode()
+			return exitCode(exit)
 		}
+		fmt.Fprintln(os.Stderr, e)
 		return 1
 	}
 	return 0
@@ -83,18 +84,29 @@ func Command() *cobra.Command {
 				validateArgs = cobra.RangeArgs(count-1, count)
 			}
 			cmd := &cobra.Command{Use: use, Args: validateArgs}
-			cmd.Flags().Int64Var(&revision, "revision", 0, "Expected revision (0 means absent)")
-			cmd.Flags().BoolVar(&recursive, "recursive", false, "Delete a non-empty bucket")
-			cmd.Flags().BoolVar(&stdin, "stdin", false, "Read value from stdin")
-			cmd.Flags().StringVar(&description, "description", "", "Bucket description")
+			format = "json"
+			if verb == "update" || verb == "set" || verb == "delete" {
+				cmd.Flags().Int64Var(&revision, "revision", 0, "Expected revision (0 means absent)")
+			}
+			if kind == "bucket" && verb == "delete" {
+				cmd.Flags().BoolVar(&recursive, "recursive", false, "Delete a non-empty bucket")
+			}
+			if kind == "secret" && (verb == "add" || verb == "update" || verb == "set") {
+				cmd.Flags().BoolVar(&stdin, "stdin", false, "Read value from stdin")
+				cmd.Flags().StringVar(&secretType, "type", "string", "Secret type: string, number, boolean, null")
+			}
+			if kind == "bucket" && (verb == "add" || verb == "update") {
+				cmd.Flags().StringVar(&description, "description", "", "Bucket description")
+			}
 			if kind == "bucket" && verb == "update" {
 				cmd.Flags().StringVar(&newName, "name", "", "New bucket name")
 			}
-			cmd.Flags().StringVar(&cursor, "cursor", "", "Opaque listing cursor")
-			cmd.Flags().IntVar(&limit, "limit", 100, "Page size (overrides config page-size)")
-			cmd.Flags().StringVar(&format, "format", "json", "Output format (json)")
-			if kind == "secret" && (verb == "add" || verb == "update" || verb == "set") {
-				cmd.Flags().StringVar(&secretType, "type", "string", "Secret type: string, number, boolean, null")
+			if verb == "list" {
+				cmd.Flags().StringVar(&cursor, "cursor", "", "Opaque listing cursor")
+				cmd.Flags().IntVar(&limit, "limit", 100, "Page size (overrides config page-size)")
+			}
+			if kind == "bucket" && verb == "read" {
+				cmd.Flags().StringVar(&format, "format", "json", "Output format")
 			}
 			if kind == "bucket" && verb == "read" {
 				cmd.Flags().Lookup("format").Usage = "Output format: json (snapshot), typed-json, nested-json, yaml"
@@ -148,8 +160,14 @@ func Command() *cobra.Command {
 						p["cursor"] = cursor
 					}
 				}
-				if kind == "bucket" && (verb == "add" || verb == "update") {
-					if !cmd.Flags().Changed("name") || cmd.Flags().Changed("description") {
+				if kind == "bucket" && verb == "add" {
+					p["description"] = description
+				}
+				if kind == "bucket" && verb == "update" {
+					if !cmd.Flags().Changed("name") && !cmd.Flags().Changed("description") {
+						return errors.New("set --name or --description")
+					}
+					if cmd.Flags().Changed("description") {
 						p["description"] = description
 					}
 					if cmd.Flags().Changed("name") {
@@ -168,7 +186,7 @@ func Command() *cobra.Command {
 				if kind == "secret" && (verb == "add" || verb == "update" || verb == "set") {
 					var b []byte
 					if stdin {
-						b, e = io.ReadAll(io.LimitReader(os.Stdin, 65537))
+						b, e = io.ReadAll(io.LimitReader(cmd.InOrStdin(), 65537))
 					} else {
 						fmt.Fprint(os.Stderr, "Value: ")
 						b, e = term.ReadPassword(int(os.Stdin.Fd()))
@@ -184,9 +202,11 @@ func Command() *cobra.Command {
 					if _, e = darkvault.ParseScalar(string(b), secretType); e != nil {
 						return e
 					}
-					p["type"] = secretType
+					if cmd.Flags().Changed("type") {
+						p["type"] = secretType
+					}
 				}
-				result, e := c.Execute(cmd.Context(), kind+"."+op, p)
+				result, e := c.ExecuteValidated(cmd.Context(), kind+"."+op, p)
 				if e != nil {
 					return e
 				}
@@ -240,6 +260,7 @@ func Command() *cobra.Command {
 	run.Flags().StringVar(&bucket, "bucket", "", "Bucket name")
 	run.Flags().BoolVar(&aspnet, "aspnet-keys", false, "Map : to __ in environment names")
 	run.Flags().BoolVar(&overwrite, "overwrite-env", false, "Allow replacing inherited variables")
+	run.Flags().SetInterspersed(false)
 	run.RunE = func(cmd *cobra.Command, args []string) error {
 		filename, e := path()
 		if e != nil {
@@ -272,13 +293,14 @@ func Command() *cobra.Command {
 		child.Stdin = os.Stdin
 		child.Stdout = cmd.OutOrStdout()
 		child.Stderr = cmd.ErrOrStderr()
-		return child.Run()
+		return runChild(cmd.Context(), child)
 	}
 	root.AddCommand(run)
 	return root
 }
 func Environment(inherited []string, values map[string]string, aspnet, overwrite bool) ([]string, error) {
 	env := map[string]string{}
+	driveVariables := []string{}
 	normalize := func(s string) string {
 		if runtime.GOOS == "windows" {
 			return strings.ToUpper(s)
@@ -286,6 +308,10 @@ func Environment(inherited []string, values map[string]string, aspnet, overwrite
 		return s
 	}
 	for _, s := range inherited {
+		if strings.HasPrefix(s, "=") {
+			driveVariables = append(driveVariables, s)
+			continue
+		}
 		k, _, ok := strings.Cut(s, "=")
 		if ok && !strings.EqualFold(k, "DARKVAULT_TOKEN") && !strings.EqualFold(k, "DARKVAULT_TOKEN_FILE") && !strings.EqualFold(k, "DARKVAULT_URL") {
 			env[normalize(k)] = s
@@ -311,6 +337,7 @@ func Environment(inherited []string, values map[string]string, aspnet, overwrite
 		env[name] = k + "=" + v
 	}
 	result := make([]string, 0, len(env))
+	result = append(result, driveVariables...)
 	for _, v := range env {
 		result = append(result, v)
 	}

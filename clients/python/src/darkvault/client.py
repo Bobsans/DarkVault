@@ -7,10 +7,12 @@ import math
 import os
 import random
 import re
+import select
+import socket
 import ssl
 import threading
 import time
-from typing import Any
+from typing import Any, TypedDict, cast
 from urllib.parse import urlsplit
 from uuid import UUID, uuid4
 
@@ -28,14 +30,43 @@ _ERRORS = {"invalid_request", "invalid_envelope", "unsupported_version", "unknow
            "invalid_bucket_name", "invalid_key", "invalid_cursor", "unknown_operation", "revision_exhausted", "invalid_secret_type"}
 
 
+class BucketSnapshot(TypedDict):
+    bucketId: str
+    revision: int
+    secrets: dict[str, str]
+    types: dict[str, str]
+
+
 class DarkVaultError(Exception):
     """Safe error metadata; never includes the raw request or server response."""
 
-    def __init__(self, code: str, status: int = 0, request_id: str | None = None):
+    def __init__(self, code: str, status: int = 0, request_id: str | None = None, retry_after: float | None = None):
         self.code = code
         self.status = status
         self.request_id = request_id
+        # Seconds from a valid Retry-After header, or None when the server sent none.
+        self.retry_after = retry_after
         super().__init__(f"DarkVault request failed ({code}).")
+
+
+def _retry_after(headers: dict[str, str]) -> float | None:
+    retry = headers.get("retry-after")
+    if retry is None:
+        return None
+    try:
+        delay = float(int(retry)) if retry.isdigit() else (parsedate_to_datetime(retry) - datetime.now(timezone.utc)).total_seconds()
+    except (ValueError, TypeError, OverflowError):
+        return None
+    return max(0.0, delay) if math.isfinite(delay) else None
+
+
+def _connection_dropped(sock: socket.socket) -> bool:
+    # An idle keep-alive socket must not be readable: readiness means EOF or unsolicited data.
+    try:
+        readable, _, _ = select.select([sock], [], [], 0)
+    except (OSError, ValueError):
+        return True
+    return bool(readable)
 
 
 def _uuid(value: Any) -> None:
@@ -136,6 +167,7 @@ class DarkVaultClient:
         self.default_bucket: str | None = None
         self._token, self._timeout = token, float(timeout)
         self._connection: http.client.HTTPSConnection | None = None
+        self._connection_used_at = 0.0
         self._key: dict[str, Any] | None = None
         self._key_until = 0.0
         self._closed = False
@@ -168,6 +200,7 @@ class DarkVaultClient:
         if self._connection is not None:
             self._connection.close()
             self._connection = None
+            self._connection_used_at = 0.0
 
     def close(self) -> None:
         with self._lock:
@@ -183,6 +216,11 @@ class DarkVaultClient:
 
     def _http(self, method: str, path: str, body: bytes | None, deadline: float) -> tuple[int, dict[str, str], bytes]:
         remaining = self._remaining(deadline)
+        # Reusing a keep-alive socket the server already closed would fail after the request was
+        # written and misreport a write as outcome_unknown, so drop idle or closed sockets first.
+        if self._connection is not None and self._connection.sock is not None and (
+                time.monotonic() - self._connection_used_at >= 60 or _connection_dropped(self._connection.sock)):
+            self._disconnect()
         if self._connection is None:
             self._connection = http.client.HTTPSConnection(self._host, self._port, timeout=remaining, context=self._ssl)
         connection = self._connection
@@ -217,6 +255,7 @@ class DarkVaultClient:
             if response.length not in (None, 0):
                 raise http.client.IncompleteRead(b"")
             self._remaining(deadline)
+            self._connection_used_at = time.monotonic()
             return response.status, {k.lower(): v for k, v in response.getheaders()}, b"".join(chunks)
         finally:
             response.close()
@@ -231,32 +270,29 @@ class DarkVaultClient:
         if status != 200:
             raise DarkVaultError("key_unavailable", status)
         value = wire.loads(body)
-        if set(value) != {"protocolVersion", "serverId", "serverTime", "kid", "publicKey", "notAfter", "limits"} or type(value["protocolVersion"]) is not int or value["protocolVersion"] != 1 or _date(value["notAfter"]) <= datetime.now(timezone.utc):
+        if not {"protocolVersion", "serverId", "serverTime", "kid", "publicKey", "notAfter", "limits"}.issubset(value) or type(value["protocolVersion"]) is not int or value["protocolVersion"] != 1 or _date(value["notAfter"]) <= datetime.now(timezone.utc):
             raise ValueError("Invalid server key")
         _uuid(value["serverId"])
         _uuid(value["kid"])
         _date(value["serverTime"])
         wire.public_key(value["publicKey"])
         limits = value["limits"]
-        if set(limits) != {"maxBodyBytes", "maxPlaintextBytes"} or type(limits["maxBodyBytes"]) is not int or not 1 <= limits["maxBodyBytes"] <= wire.MAX_BODY or type(limits["maxPlaintextBytes"]) is not int or not 1 <= limits["maxPlaintextBytes"] <= wire.MAX_PLAINTEXT:
+        if not {"maxBodyBytes", "maxPlaintextBytes"}.issubset(limits) or type(limits["maxBodyBytes"]) is not int or not 1 <= limits["maxBodyBytes"] <= wire.MAX_BODY or type(limits["maxPlaintextBytes"]) is not int or not 1 <= limits["maxPlaintextBytes"] <= wire.MAX_PLAINTEXT:
             raise ValueError("Invalid server limits")
         self._key = value
         self._key_until = time.monotonic() + 300
         return value
 
     @staticmethod
-    def _pause(headers: dict[str, str], attempt: int, deadline: float) -> None:
-        delay = 0.2 * (attempt + 1) + random.random() * 0.1
-        retry = headers.get("retry-after")
-        if retry is not None:
-            try:
-                delay = float(int(retry)) if retry.isdigit() else (parsedate_to_datetime(retry) - datetime.now(timezone.utc)).total_seconds()
-            except (ValueError, TypeError, OverflowError):
-                pass
-        delay = max(0, delay)
-        if not math.isfinite(delay) or delay >= DarkVaultClient._remaining(deadline):
+    def _pause(headers: dict[str, str], attempt: int, deadline: float) -> bool:
+        retry = _retry_after(headers)
+        delay = 0.2 * (attempt + 1) + random.random() * 0.1 if retry is None else retry
+        if delay >= DarkVaultClient._remaining(deadline):
+            if retry is not None:
+                return False
             raise TimeoutError()
         time.sleep(delay)
+        return True
 
     def execute(self, operation: str, parameters: dict[str, Any]) -> dict[str, Any]:
         """Execute a data operation; administrative cookie operations are not supported."""
@@ -297,10 +333,11 @@ class DarkVaultClient:
                             self._key, key_retry = None, True
                             continue
                         if read and retries < 2 and (status == 429 or status >= 500):
-                            self._pause(headers, retries, deadline)
+                            if not self._pause(headers, retries, deadline):
+                                raise DarkVaultError(code, status, request_id, _retry_after(headers))
                             retries += 1
                             continue
-                        raise DarkVaultError(code, status, request_id)
+                        raise DarkVaultError(code, status, request_id, _retry_after(headers))
                     response = wire.decrypt(body, reply, request_id, "darkvault-response+jwe")
                     if type(response["v"]) is not int or response["v"] != 1 or type(response["status"]) is not int or response["status"] != status:
                         raise ValueError("Invalid response version or status")
@@ -323,7 +360,8 @@ class DarkVaultClient:
                     raise DarkVaultError("outcome_unknown" if sent and not read else "timeout", request_id=request_id) from None
                 except (OSError, http.client.HTTPException):
                     self._disconnect()
-                    if read and retries < 2:
+                    # Key discovery precedes the write, so repeating it is safe for every operation.
+                    if (read or not sent) and retries < 2:
                         try:
                             self._pause({}, retries, deadline)
                         except TimeoutError:
@@ -344,12 +382,12 @@ class DarkVaultClient:
     def list_buckets(self, *, cursor: str | None = None, limit: int = 100) -> dict[str, Any]:
         return self.execute("bucket.list", {"cursor": cursor, "limit": limit})
 
-    def read_bucket_snapshot(self, bucket: str | None = None) -> dict[str, Any]:
+    def read_bucket_snapshot(self, bucket: str | None = None) -> BucketSnapshot:
         if bucket is None:
             bucket = self.default_bucket
         if bucket is None:
             raise ValueError("Specify a bucket or use a connection string containing one")
-        return self.execute("bucket.read", {"bucket": bucket})
+        return cast(BucketSnapshot, self.execute("bucket.read", {"bucket": bucket}))
 
     def read_bucket(self, bucket: str | None = None) -> dict[str, str]:
         return self.read_bucket_snapshot(bucket)["secrets"]

@@ -18,6 +18,7 @@ using NUnit.Framework;
 namespace DarkVault.Server.Tests;
 
 public sealed class SecurityTests {
+    private static readonly JsonSerializerOptions TestJson = new(JsonSerializerDefaults.Web);
     [Test]
     public void ProtectedKeyringRejectsMissingWrongAndTamperedKeysAndSurvivesCopy() {
         var directory = Path.Combine(Path.GetTempPath(), "dv-wrapping-" + Guid.NewGuid()); Directory.CreateDirectory(directory);
@@ -36,9 +37,9 @@ public sealed class SecurityTests {
                 Assert.That(restored.ServerId, Is.EqualTo(serverId));
                 Assert.That(restored.Decrypt(encrypted, metadata), Is.EqualTo("wrapped-test-secret"));
             }
-            var envelope = JsonSerializer.Deserialize<KeyRing.ProtectedRing>(json, Wire.Json)!;
+            var envelope = JsonSerializer.Deserialize<KeyRing.ProtectedRing>(json, TestJson)!;
             var cipher = Wire.Unbase64(envelope.Ciphertext); cipher[0] ^= 1;
-            File.WriteAllText(path, JsonSerializer.Serialize(envelope with { Ciphertext = Wire.Base64(cipher) }, Wire.Json));
+            File.WriteAllText(path, JsonSerializer.Serialize(envelope with { Ciphertext = Wire.Base64(cipher) }, TestJson));
             Assert.Throws<AuthenticationTagMismatchException>(() => new KeyRing(path, false, wrapping));
         } finally { CryptographicOperations.ZeroMemory(wrapping); Directory.Delete(directory, true); }
     }
@@ -46,7 +47,7 @@ public sealed class SecurityTests {
     [Test]
     public async Task AuditStorageFailurePreventsSecretResponse() {
         await using var host = await Host.Start([]);
-        JsonElement Run(string operation, object parameters) => JsonSerializer.SerializeToElement(host.Store.Run(new("test", true), operation, JsonSerializer.SerializeToElement(parameters), Guid.NewGuid().ToString()), Wire.Json);
+        JsonElement Run(string operation, object parameters) => JsonSerializer.SerializeToElement(host.Store.Run(new("test", true), operation, JsonSerializer.SerializeToElement(parameters), Guid.NewGuid().ToString()), TestJson);
         var bucket = Run("bucket.create", new { name = "audit_gate" }).GetProperty("id").GetString();
         Run("secret.create", new { bucket = "audit_gate", key = "private", value = "must-not-be-returned" });
         var token = Run("token.create", new { name = "test", scopes = new[] { "secret:read" }, bucketIds = new[] { bucket }, allBuckets = false, creatableBucketNames = Array.Empty<string>() }).GetProperty("token").GetString();
@@ -111,14 +112,14 @@ public sealed class SecurityTests {
                 creatableBucketNames = Array.Empty<string>(),
                 expiresAt
             }), Guid.NewGuid().ToString());
-            var issued = JsonSerializer.SerializeToElement(Create(null), Wire.Json);
+            var issued = JsonSerializer.SerializeToElement(Create(null), TestJson);
             var principal = store.Authenticate(issued.GetProperty("token").GetString()!);
             Assert.That(principal.Token!.ExpiresAt, Is.InRange(DateTimeOffset.UtcNow.AddDays(29), DateTimeOffset.UtcNow.AddDays(31)));
             var yearlyExpiry = DateTimeOffset.UtcNow.AddYears(1);
-            var yearly = JsonSerializer.SerializeToElement(Create(yearlyExpiry), Wire.Json);
+            var yearly = JsonSerializer.SerializeToElement(Create(yearlyExpiry), TestJson);
             var yearlyPrincipal = store.Authenticate(yearly.GetProperty("token").GetString()!);
             Assert.That(yearlyPrincipal.Token!.ExpiresAt, Is.EqualTo(yearlyExpiry));
-            var listed = JsonSerializer.SerializeToElement(store.Run(new("test", true), "token.list", JsonSerializer.SerializeToElement(new { }), Guid.NewGuid().ToString()), Wire.Json);
+            var listed = JsonSerializer.SerializeToElement(store.Run(new("test", true), "token.list", JsonSerializer.SerializeToElement(new { }), Guid.NewGuid().ToString()), TestJson);
             Assert.That(listed.GetProperty("items").EnumerateArray().Single(t => t.GetProperty("info").GetProperty("id").GetString() == yearlyPrincipal.Id).GetProperty("info").GetProperty("expiresAt").GetDateTimeOffset(), Is.EqualTo(yearlyExpiry));
             Assert.Throws<VaultFault>(() => Create(DateTimeOffset.UtcNow.AddYears(1).AddMinutes(1)));
             Assert.Throws<VaultFault>(() => Create(DateTimeOffset.UtcNow.AddMinutes(-1)));
@@ -137,10 +138,16 @@ public sealed class SecurityTests {
         for (var i = 0; i < 10; i++) protection.Failed(ip, true);
         Assert.That(protection.RetryAfter(ip), Is.EqualTo(1800));
         time.Now += TimeSpan.FromDays(2);
-        for (var i = 0; i < AbuseProtection.Capacity; i++) protection.Failed(new IPAddress(new byte[] { 10, (byte)(i >> 8), (byte)i, 1 }), false);
-        Assert.That(protection.RetryAfter(ip), Is.EqualTo(60));
-        time.Now += TimeSpan.FromDays(2);
-        Assert.That(protection.RetryAfter(ip), Is.Zero);
+        var activeBan = IPAddress.Parse("192.0.2.3");
+        for (var i = 0; i < 60; i++) protection.Failed(activeBan, false);
+        Assert.That(protection.RetryAfter(activeBan), Is.EqualTo(900));
+        for (var i = 0; i < AbuseProtection.Capacity - 1; i++)
+            protection.Failed(new IPAddress(new byte[] { 10, (byte)(i >> 8), (byte)i, 1 }), false);
+        var newcomer = IPAddress.Parse("203.0.113.10");
+        Assert.That(protection.RetryAfter(newcomer), Is.Zero);
+        for (var i = 0; i < 60; i++) protection.Failed(newcomer, false);
+        Assert.That(protection.RetryAfter(newcomer), Is.EqualTo(900));
+        Assert.That(protection.RetryAfter(activeBan), Is.EqualTo(900));
     }
 
     [Test]
@@ -156,6 +163,7 @@ public sealed class SecurityTests {
     public void GlobalQuotaAndIndependentLoginAndPrincipalQuotasAreEnforced() {
         using var limits = new SecurityLimits(new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?> {
             ["Security:RateLimits:Global"] = "3",
+            ["Security:RateLimits:Admission"] = "3",
             ["Security:RateLimits:Login"] = "1",
             ["Security:RateLimits:Principal"] = "1"
         }).Build());
@@ -165,6 +173,10 @@ public sealed class SecurityTests {
         }
         using var denied = limits.Network.AttemptAcquire(new DefaultHttpContext()); Assert.That(denied.IsAcquired, Is.False);
         Assert.That(SecurityLimits.RetryAfter(denied), Is.InRange(1, 60));
+        for (var i = 0; i < 3; i++) { using var lease = limits.AnonymousRequests.AttemptAcquire(); Assert.That(lease.IsAcquired, Is.True); }
+        using var anonymousDenied = limits.AnonymousRequests.AttemptAcquire(); Assert.That(anonymousDenied.IsAcquired, Is.False);
+        for (var i = 0; i < 3; i++) { using var lease = limits.AuthenticatedRequests.AttemptAcquire(); Assert.That(lease.IsAcquired, Is.True); }
+        using var authenticatedDenied = limits.AuthenticatedRequests.AttemptAcquire(); Assert.That(authenticatedDenied.IsAcquired, Is.False);
         using var first = limits.Logins.AttemptAcquire("a"); using var same = limits.Logins.AttemptAcquire("a"); using var other = limits.Logins.AttemptAcquire("b");
         Assert.That(first.IsAcquired && !same.IsAcquired && other.IsAcquired, Is.True);
         using var token = limits.Principals.AttemptAcquire("token:a"); using var retry = limits.Principals.AttemptAcquire("token:a");
@@ -189,6 +201,43 @@ public sealed class SecurityTests {
     }
 
     [Test]
+    public async Task AnonymousTrafficCannotExhaustTheAuthenticatedBudget() {
+        await using var host = await Host.Start(["--Security:RateLimits:Global=2"]);
+        var token = JsonSerializer.SerializeToElement(host.Store.Run(new("test", true), "token.create", JsonSerializer.SerializeToElement(new {
+            name = "budget",
+            scopes = Array.Empty<string>(),
+            bucketIds = Array.Empty<string>(),
+            allBuckets = false,
+            creatableBucketNames = Array.Empty<string>()
+        }), Guid.NewGuid().ToString()), TestJson).GetProperty("token").GetString();
+        for (var i = 0; i < 3; i++) {
+            using var anonymous = await host.Http.GetAsync(host.Url + "/api/v1/crypto/key");
+            Assert.That(anonymous.StatusCode, Is.EqualTo(i < 2 ? HttpStatusCode.OK : HttpStatusCode.TooManyRequests));
+        }
+        using var ready = await host.Http.GetAsync(host.Url + "/health/ready");
+        Assert.That(ready.StatusCode, Is.EqualTo(HttpStatusCode.OK));
+        for (var i = 0; i < 2; i++) {
+            using var request = new HttpRequestMessage(HttpMethod.Post, host.Url + "/api/v1/execute");
+            request.Headers.Authorization = new("Bearer", token);
+            // An empty body passes admission and fails later as an invalid envelope, not as rate limited.
+            using var response = await host.Http.SendAsync(request);
+            Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.BadRequest));
+        }
+    }
+
+    [Test]
+    public async Task UnexpectedFailuresAreUnavailableRatherThanInvalidRequests() {
+        await using var host = await Host.Start([]);
+        host.Store.Dispose();
+        using var request = new HttpRequestMessage(HttpMethod.Post, host.Url + "/api/v1/execute");
+        request.Headers.Authorization = new("Bearer", Wire.NewToken());
+        using var response = await host.Http.SendAsync(request);
+        Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.ServiceUnavailable));
+        var error = await response.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.That(error.GetProperty("error").GetProperty("code").GetString(), Is.EqualTo("unavailable"));
+    }
+
+    [Test]
     public async Task PrincipalQuotaFollowsTokenAcrossTrustedSourceAddresses() {
         await using var host = await Host.Start(["--Security:RateLimits:Principal=2", "--DARKVAULT_TRUSTED_PROXIES=127.0.0.1"]);
         var result = JsonSerializer.SerializeToElement(host.Store.Run(new("test", true), "token.create", JsonSerializer.SerializeToElement(new {
@@ -197,7 +246,7 @@ public sealed class SecurityTests {
             bucketIds = Array.Empty<string>(),
             allBuckets = false,
             creatableBucketNames = Array.Empty<string>()
-        }), Guid.NewGuid().ToString()), Wire.Json);
+        }), Guid.NewGuid().ToString()), TestJson);
         var token = result.GetProperty("token").GetString();
         for (var i = 0; i < 3; i++) {
             using var request = new HttpRequestMessage(HttpMethod.Post, host.Url + "/api/v1/execute");
@@ -218,7 +267,7 @@ public sealed class SecurityTests {
             if (i == 60) Assert.That(response.Headers.RetryAfter?.Delta, Is.GreaterThan(TimeSpan.FromMinutes(14)));
         }
         await host.App.StopAsync();
-        var audit = JsonSerializer.SerializeToElement(host.Store.Run(new("test", true), "audit.list", JsonSerializer.SerializeToElement(new { limit = 200 }), Guid.NewGuid().ToString()), Wire.Json);
+        var audit = JsonSerializer.SerializeToElement(host.Store.Run(new("test", true), "audit.list", JsonSerializer.SerializeToElement(new { limit = 200 }), Guid.NewGuid().ToString()), TestJson);
         Assert.That(audit.GetProperty("items").EnumerateArray().Any(e => e.GetProperty("kind").GetString() == "http"), Is.False);
     }
 

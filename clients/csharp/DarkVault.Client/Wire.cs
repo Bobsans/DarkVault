@@ -5,9 +5,19 @@ using System.Text.Json.Serialization;
 using System.Text.Json.Serialization.Metadata;
 using Jose;
 
+#if DARKVAULT_SERVER
+namespace DarkVault.Server;
+#else
 namespace DarkVault.Client;
+#endif
 
-public static class Wire {
+// Protocol internals: public only in the server build, which compiles this file directly.
+#if DARKVAULT_SERVER
+public
+#else
+internal
+#endif
+static class Wire {
     public const int MaxBody = 2 * 1024 * 1024;
     public const int MaxPlaintext = 1536 * 1024;
     public static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web) {
@@ -16,12 +26,24 @@ public static class Wire {
         UnmappedMemberHandling = JsonUnmappedMemberHandling.Disallow,
         RespectRequiredConstructorParameters = true,
         RespectNullableAnnotations = true,
-        TypeInfoResolver = JsonSerializer.IsReflectionEnabledByDefault
-            ? JsonTypeInfoResolver.Combine(WireJsonContext.Default, new DefaultJsonTypeInfoResolver())
-            : WireJsonContext.Default,
+#if DARKVAULT_SERVER
+        TypeInfoResolver = WireJsonContext.Default,
+#else
+        TypeInfoResolver = ClientResolver(),
+#endif
         Converters = { new UtcDateConverter() }
     };
+#if !DARKVAULT_SERVER
+    // The reflection fallback serves only the annotated ExecuteAsync(object) overload and is
+    // unreachable when trimming or Native AOT turns off the JsonSerializer reflection switch.
+    [System.Diagnostics.CodeAnalysis.UnconditionalSuppressMessage("Trimming", "IL2026", Justification = "Guarded by JsonSerializer.IsReflectionEnabledByDefault.")]
+    [System.Diagnostics.CodeAnalysis.UnconditionalSuppressMessage("AOT", "IL3050", Justification = "Guarded by JsonSerializer.IsReflectionEnabledByDefault.")]
+    private static IJsonTypeInfoResolver ClientResolver() => JsonSerializer.IsReflectionEnabledByDefault
+        ? JsonTypeInfoResolver.Combine(WireJsonContext.Default, new DefaultJsonTypeInfoResolver())
+        : WireJsonContext.Default;
+#endif
     public static readonly JsonSerializerOptions ResponseJson = new(Json) { UnmappedMemberHandling = JsonUnmappedMemberHandling.Skip };
+    static Wire() { Json.MakeReadOnly(); ResponseJson.MakeReadOnly(); }
     public static JsonTypeInfo<T> TypeInfo<T>(JsonSerializerOptions? options = null) => (JsonTypeInfo<T>)(options ?? Json).GetTypeInfo(typeof(T));
     public static string Serialize<T>(T value) => JsonSerializer.Serialize(value, TypeInfo<T>());
     public static JsonElement ToElement(object value) => JsonSerializer.SerializeToElement(value, Json.GetTypeInfo(value.GetType()));
@@ -50,10 +72,14 @@ public static class Wire {
         if (Base64(bytes) != text) throw new FormatException("Noncanonical base64url.");
         return bytes;
     }
+#if DARKVAULT_SERVER
     public static string HashToken(string token) => Convert.ToHexString(SHA256.HashData(Encoding.ASCII.GetBytes(token)));
+#endif
     public static bool IsToken(string token) => token.Length == 64 && token.StartsWith("dv1_", StringComparison.Ordinal)
         && token.AsSpan(4).ToArray().All(c => char.IsAsciiLetterOrDigit(c) || c is '-' or '_');
+#if DARKVAULT_SERVER
     public static string NewToken() => "dv1_" + Base64(RandomNumberGenerator.GetBytes(45));
+#endif
     public static PublicKey Export(ECDsa key) {
         var p = key.ExportParameters(false);
         return new("EC", "P-256", Base64(p.Q.X!), Base64(p.Q.Y!));
@@ -130,12 +156,43 @@ public static class Wire {
     }
 }
 
-public sealed record PublicKey(string Kty, string Crv, string X, string Y);
-public sealed record CryptoKey(int ProtocolVersion, string ServerId, DateTimeOffset ServerTime, string Kid, PublicKey PublicKey, DateTimeOffset NotAfter, TransportLimits Limits);
-public sealed record TransportLimits(int MaxBodyBytes, int MaxPlaintextBytes);
-public sealed record VaultRequest(int V, string RequestId, DateTimeOffset IssuedAt, string ServerId, string Audience, string Operation, JsonElement Parameters, PublicKey ReplyKey);
-public sealed record VaultError(string Code, string Message);
-public sealed record VaultResponse(int V, string RequestId, string ServerId, string Audience, string Operation, int Status, JsonElement? Data, VaultError? Error);
+// Envelope and key-discovery records are transport internals of the SDK; only the server build exposes them.
+#if DARKVAULT_SERVER
+public
+#else
+internal
+#endif
+sealed record PublicKey(string Kty, string Crv, string X, string Y);
+#if DARKVAULT_SERVER
+public
+#else
+internal
+#endif
+sealed record CryptoKey(int ProtocolVersion, string ServerId, DateTimeOffset ServerTime, string Kid, PublicKey PublicKey, DateTimeOffset NotAfter, TransportLimits Limits);
+#if DARKVAULT_SERVER
+public
+#else
+internal
+#endif
+sealed record TransportLimits(int MaxBodyBytes, int MaxPlaintextBytes);
+#if DARKVAULT_SERVER
+public
+#else
+internal
+#endif
+sealed record VaultRequest(int V, string RequestId, DateTimeOffset IssuedAt, string ServerId, string Audience, string Operation, JsonElement Parameters, PublicKey ReplyKey);
+#if DARKVAULT_SERVER
+public
+#else
+internal
+#endif
+sealed record VaultError(string Code, string Message);
+#if DARKVAULT_SERVER
+public
+#else
+internal
+#endif
+sealed record VaultResponse(int V, string RequestId, string ServerId, string Audience, string Operation, int Status, JsonElement? Data, VaultError? Error);
 public sealed record Bucket(string Id, string Name, string Description, long Revision, DateTimeOffset CreatedAt, DateTimeOffset UpdatedAt);
 public sealed record SecretMetadata(string Id, string BucketId, string Key, long Revision, DateTimeOffset CreatedAt, DateTimeOffset UpdatedAt, string Type);
 public sealed record Secret(string Id, string BucketId, string Key, long Revision, DateTimeOffset CreatedAt, DateTimeOffset UpdatedAt, string Value, string Type) {
@@ -144,11 +201,14 @@ public sealed record Secret(string Id, string BucketId, string Key, long Revisio
 public sealed record BucketSnapshot(string BucketId, long Revision, Dictionary<string, string?> Secrets, Dictionary<string, string> Types);
 public sealed record Page<T>(IReadOnlyList<T> Items, string? NextCursor);
 public sealed record TokenInfo(string Id, string Name, string[] Scopes, string[] BucketIds, bool AllBuckets, string[] CreatableBucketNames, DateTimeOffset? ExpiresAt);
+#if !DARKVAULT_SERVER
 internal static class ErrorCode {
     public static string Safe(string? value) => value is { Length: > 0 and <= 64 } && value.All(ch => ch is >= 'a' and <= 'z' or '_') ? value : "server_error";
 }
-public sealed class DarkVaultException(string code, int status, string? requestId = null) : Exception($"DarkVault request failed ({ErrorCode.Safe(code)}).") {
+public sealed class DarkVaultException(string code, int status, string? requestId = null, TimeSpan? retryAfter = null) : Exception($"DarkVault request failed ({ErrorCode.Safe(code)}).") {
     public string Code { get; } = ErrorCode.Safe(code);
     public int Status { get; } = status;
     public string? RequestId { get; } = requestId;
+    public TimeSpan? RetryAfter { get; } = retryAfter;
 }
+#endif

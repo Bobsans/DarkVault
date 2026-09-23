@@ -8,6 +8,8 @@ public sealed class SecurityLimits : IDisposable {
     public PartitionedRateLimiter<string> Principals { get; }
     public PartitionedRateLimiter<string> Logins { get; }
     public PartitionedRateLimiter<string> Mfa { get; }
+    public RateLimiter AnonymousRequests { get; }
+    public RateLimiter AuthenticatedRequests { get; }
     public RateLimiter Passwords { get; }
     public SemaphoreSlim PasswordConcurrency { get; } = new(2);
 
@@ -18,6 +20,7 @@ public sealed class SecurityLimits : IDisposable {
             return value is > 0 and <= 100000 ? value : throw new InvalidOperationException("Invalid security rate limit: " + name);
         }
         var global = Limit("Global", 3000);
+        var admission = Limit("Admission", Math.Min(100000, global * 10));
         var ip = Limit("Ip", 300);
         var principal = Limit("Principal", 300);
         var login = Limit("Login", 5);
@@ -26,11 +29,13 @@ public sealed class SecurityLimits : IDisposable {
         // Global admission precedes attacker-controlled partitions. The built-in limiter
         // replenishes and evicts idle partitions, bounding creation to the global budget.
         Network = PartitionedRateLimiter.CreateChained(
-            PartitionedRateLimiter.Create<HttpContext, string>(_ => Window("global", global)),
+            PartitionedRateLimiter.Create<HttpContext, string>(_ => Window("admission", admission)),
             PartitionedRateLimiter.Create<HttpContext, string>(c => Window(AddressKey(c.Connection.RemoteIpAddress), ip)));
         Principals = PartitionedRateLimiter.Create<string, string>(id => Window(id, principal));
         Logins = PartitionedRateLimiter.Create<string, string>(ipKey => Window(ipKey, login));
         Mfa = PartitionedRateLimiter.Create<string, string>(ipKey => Window(ipKey, mfa));
+        AnonymousRequests = new FixedWindowRateLimiter(new() { PermitLimit = global, Window = TimeSpan.FromMinutes(1), QueueLimit = 0 });
+        AuthenticatedRequests = new FixedWindowRateLimiter(new() { PermitLimit = global, Window = TimeSpan.FromMinutes(1), QueueLimit = 0 });
         Passwords = new FixedWindowRateLimiter(new() { PermitLimit = password, Window = TimeSpan.FromMinutes(1), QueueLimit = 0 });
     }
 
@@ -50,6 +55,6 @@ public sealed class SecurityLimits : IDisposable {
         ? Math.Max(1, (int)Math.Ceiling(delay.TotalSeconds)) : 1;
 
     public void Dispose() {
-        Network.Dispose(); Principals.Dispose(); Logins.Dispose(); Mfa.Dispose(); Passwords.Dispose(); PasswordConcurrency.Dispose();
+        Network.Dispose(); Principals.Dispose(); Logins.Dispose(); Mfa.Dispose(); AnonymousRequests.Dispose(); AuthenticatedRequests.Dispose(); Passwords.Dispose(); PasswordConcurrency.Dispose();
     }
 }

@@ -14,8 +14,7 @@ public sealed class AbuseProtection(TimeProvider clock) {
             var now = clock.GetUtcNow(); Cleanup(now);
             if (sources.TryGetValue(SecurityLimits.AddressKey(address), out var state))
                 return Math.Max(0, (int)Math.Ceiling((state.BlockedUntil - now).TotalSeconds));
-            // Do not evict live bans to make room for attacker-controlled source addresses.
-            return sources.Count >= Capacity ? 60 : 0;
+            return 0;
         }
     }
 
@@ -24,7 +23,14 @@ public sealed class AbuseProtection(TimeProvider clock) {
             var now = clock.GetUtcNow(); Cleanup(now);
             var key = SecurityLimits.AddressKey(address);
             if (!sources.TryGetValue(key, out var state)) {
-                if (sources.Count >= Capacity) return;
+                if (sources.Count >= Capacity) {
+                    // ponytail: O(capacity) eviction scan under the abuse lock; use an LRU if request volume makes it costly.
+                    string? oldest = null; var last = DateTimeOffset.MaxValue;
+                    foreach (var (candidate, attempt) in sources)
+                        if (attempt.Strikes == 0 && attempt.BlockedUntil <= now && attempt.Last < last) { oldest = candidate; last = attempt.Last; }
+                    if (oldest is null) return;
+                    sources.Remove(oldest);
+                }
                 sources.Add(key, state = new Attempts { Window = now });
             }
             if (state.BlockedUntil > now) return;

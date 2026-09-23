@@ -60,9 +60,10 @@ try {
     [IO.File]::WriteAllText($pythonProject, $pythonText, [Text.UTF8Encoding]::new($false))
     python -m build clients/python --outdir $assets
 
-    tar -czf (Join-Path $assets "darkvault-go-$Tag.tar.gz") -C clients/go LICENSE README.md go.mod go.sum client.go operations.go configuration.go client_test.go operations_test.go configuration_test.go testdata -C $assets release.json
+    $goFiles = @(git -C $root ls-files -- clients/go | ForEach-Object { $_.Substring('clients/go/'.Length) })
+    if ($LASTEXITCODE -ne 0 -or !$goFiles.Count) { throw 'Could not list tracked Go SDK files.' }
+    tar -czf (Join-Path $assets "darkvault-go-$Tag.tar.gz") -C clients/go @goFiles -C $assets release.json
 
-    pnpm --dir clients/typescript install --frozen-lockfile
     $typescriptPackage = [Text.Encoding]::UTF8.GetString($originalTypescriptProject) | ConvertFrom-Json
     $typescriptPackage.version = $version
     $typescriptPackage | Add-Member -NotePropertyName gitHead -NotePropertyValue $commit -Force

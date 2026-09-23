@@ -18,6 +18,8 @@ Cookie не принимается. Для браузера выделен `/adm
 
 Поддерживаемый профиль: HTTP API `/api/v1`, токены `dv1_`, envelope `v = 1`. Неизвестные форматы отклоняются.
 
+GET `/admin/api/v1/session` устанавливает CSRF cookie и возвращает `authenticated`, `csrfToken` и `serverVersion`. Endpoint публичный для состояния входа, но `serverVersion` содержит версию только при действующей административной сессии; иначе поле равно `null`.
+
 ## 2. Публичный ключ и JWE
 
 `GET /api/v1/crypto/key` возвращает текущие `protocolVersion`, `serverId`,
@@ -90,11 +92,14 @@ serverTime используется для диагностики, не для �
 Placeholder-координаты иллюстративны и не являются тестовым вектором.
 `requestId` — случайный UUIDv4, новый для каждой попытки; `issuedAt` — UTC с `Z`.
 Сервер принимает возраст до 60 секунд и опережение часов до 30 секунд.
-`serverId`, audience и тип сообщения должны соответствовать endpoint.
+`serverId`, audience и тип сообщения должны соответствовать endpoint. Ответы содержат
+`X-Request-Id`; его значение совпадает с `traceId` записи аудита.
 
-Порядок обработки: лимиты → bearer/session → разбор разрешённого JWE → decrypt →
-валидация payload/времени → проверка scopes и bucket ACL → резервирование requestId
-→ операция → ответ. Нельзя выдавать значения до полной проверки тега.
+Порядок обработки: лимиты → bearer/session → разбор JWE → decrypt и проверка GCM-тега
+→ валидация payload/времени → резервирование requestId → проверка scopes и bucket ACL
+по актуальной записи токена → операция → ответ. Отказ в правах расходует `requestId`:
+повтор того же конверта получает `409 replay_detected`. Нельзя выдавать значения до
+полной проверки тега. `/health/ready` возвращает `{ "status": "ready" }`.
 
 Сервер шифрует ответ для `replyKey` из этого запроса. Protected header ответа:
 `typ = darkvault-response+jwe`, `kid = requestId`, остальные параметры профиля те же.
@@ -154,21 +159,21 @@ JWE-запросы при его последующей утечке. Допол
 Таблица ниже — их семантическое основание. Поля, отмеченные `?`, необязательны.
 UUID, даты и имена — строки; revision — целое 0..9007199254740991 для совместимости
 с JavaScript, переполнение запрещено. Входные неизвестные поля отклоняются;
-клиенты могут игнорировать дополнительные поля успешного ответа v1.
+клиенты игнорируют неизвестные поля успешных ответов v1, включая `/api/v1/crypto/key`, сохраняя проверку обязательных полей и профиля ключей.
 
 | operation       | parameters                                   | data                                         |
 |-----------------|----------------------------------------------|----------------------------------------------|
 | `bucket.create` | `name`, `description?`                       | Bucket                                       |
 | `bucket.get`    | `bucket`                                     | Bucket                                       |
 | `bucket.list`   | `cursor?`, `limit?`                          | `items: Bucket[]`, `nextCursor`              |
-| `bucket.read`   | `bucket`                                     | `bucketId`, `revision`, `secrets` dictionary |
+| `bucket.read`   | `bucket`                                     | `bucketId`, `revision`, `secrets`, sparse `types` dictionary |
 | `bucket.update` | `bucket`, `expectedRevision`, `name?`, `description?`  | Bucket                                       |
 | `bucket.delete` | `bucket`, `expectedRevision`, `recursive?`   | `deleted: true`                              |
-| `secret.create` | `bucket`, `key`, `value`                     | SecretMetadata                               |
-| `secret.read`   | `bucket`, `key`                              | SecretMetadata + `value`                     |
+| `secret.create` | `bucket`, `key`, `value`, `type?`            | SecretMetadata                               |
+| `secret.read`   | `bucket`, `key`                              | SecretMetadata (includes `type`) + `value`    |
 | `secret.list`   | `bucket`, `cursor?`, `limit?`                | `items: SecretMetadata[]`, `nextCursor`      |
-| `secret.update` | `bucket`, `key`, `value`, `expectedRevision` | SecretMetadata                               |
-| `secret.set`    | `bucket`, `key`, `value`, `expectedRevision` | SecretMetadata                               |
+| `secret.update` | `bucket`, `key`, `value`, `expectedRevision`, `type?` | SecretMetadata                        |
+| `secret.set`    | `bucket`, `key`, `value`, `expectedRevision`, `type?` | SecretMetadata                           |
 | `secret.delete` | `bucket`, `key`, `expectedRevision`          | `deleted: true`                              |
 | `token.info`    | empty object                                 | TokenInfo                                    |
 
@@ -181,7 +186,7 @@ UUID, даты и имена — строки; revision — целое 0..900719
 создание будущих бакетов (`creatableBucketNames`) не изменяются.
 
 Bucket: `id`, `name`, `description`, `revision`, `createdAt`, `updatedAt`.
-SecretMetadata: `id`, `bucketId`, `key`, `revision`, `createdAt`, `updatedAt`.
+SecretMetadata: `id`, `bucketId`, `key`, `revision`, `createdAt`, `updatedAt`, `type`.
 TokenInfo: `id`, `name`, `scopes`, `bucketIds`, `allBuckets`,
 `creatableBucketNames`, `expiresAt`; без hash и полного токена.
 `description` по умолчанию пустая строка, максимум 1024 байта UTF-8;

@@ -89,7 +89,9 @@ pwsh tools/verify.ps1 -NativeAot
 Сценарий публикует AOT с предупреждениями как ошибками, подготавливает временную
 БД и сертификат через AcceptanceHost, затем запускает именно `DarkVault.Server`
 из каталога публикации. C#, TypeScript, Go, Python и Playwright обращаются к этому
-процессу; после остановки проверяются база, ротация ключей и повторное открытие.
+процессу. `tests/AotSmoke` публикуется Native AOT с предупреждениями как ошибками и
+проверяет C# SDK и `DarkVault.Extensions.Configuration` против того же процесса;
+после остановки проверяются база, ротация ключей и повторное открытие.
 Browser E2E включает audit и смену пароля. `-SkipInstall` допускается при уже
 установленных зависимостях. CI выполняет этот режим на всех шести нативных runners.
 `-Runtime` проверяет совпадение с ОС/архитектурой хоста; `-ReleaseTag v1.2.3`
@@ -139,8 +141,8 @@ job `release` собирает и публикует GitHub Release с верс�
 Настройка аккаунтов и первого выпуска: [publishing.md](publishing.md).
 Поддерживаются стабильные теги `vMAJOR.MINOR.PATCH`.
 Для Go SDK создаётся дополнительный тег `clients/go/vMAJOR.MINOR.PATCH` на том же
-коммите: он делает версию доступной через `go get`. Исходный модуль использует
-правила версионирования Go для v0/v1; переход SDK на v2 потребует изменения module path.
+коммите. Путь модуля с major suffix и правила тегов описаны в
+[versioning.md](versioning.md).
 
 Упаковка одного проверенного RID: `pwsh tools/package-native-server.ps1 -Tag v1.2.3 -Runtime win-x64`.
 Перед этим выполните `verify.ps1 -NativeAot -Runtime win-x64 -ReleaseTag v1.2.3` на Windows x64.

@@ -15,6 +15,7 @@ $testProjects = @(
     'clients/csharp/DarkVault.Client.Tests/DarkVault.Client.Tests.csproj'
 )
 $productProjects = @(
+    'samples/AspNet/AspNet.csproj',
     'server/DarkVault.Server/DarkVault.Server.csproj',
     'clients/csharp/DarkVault.Client/DarkVault.Client.csproj',
     'clients/csharp/DarkVault.Extensions.Configuration/DarkVault.Extensions.Configuration.csproj'
@@ -57,6 +58,7 @@ try {
     foreach ($project in $testProjects) {
         dotnet build $project -c Release --disable-build-servers -m:1 -warnaserror
     }
+    dotnet build samples/AspNet/AspNet.csproj -c Release --disable-build-servers -m:1 -warnaserror
     foreach ($project in ($productProjects + $testProjects)) {
         dotnet format whitespace $project --no-restore --verify-no-changes
     }
@@ -91,6 +93,9 @@ try {
         dotnet publish server/DarkVault.Server/DarkVault.Server.csproj -c Release -r $runtime -p:PublishProfile=NativeAot @versionProperties -o $nativeOutput --disable-build-servers -warnaserror
         $nativeServer = Join-Path $nativeOutput $(if ($IsWindows) { 'DarkVault.Server.exe' } else { 'DarkVault.Server' })
         & $nativeServer --version
+        $aotSmokeOutput = Join-Path $artifacts "aot-smoke/$runtime"
+        dotnet publish tests/AotSmoke/AotSmoke.csproj -c Release -r $runtime -o $aotSmokeOutput --disable-build-servers -warnaserror
+        $aotSmoke = Join-Path $aotSmokeOutput $(if ($IsWindows) { 'AotSmoke.exe' } else { 'AotSmoke' })
     }
     $start = @{
         FilePath = 'dotnet'
@@ -128,7 +133,10 @@ try {
     # Live SDK tests must run against the started host; a missing descriptor fails instead of skipping silently.
     $env:DARKVAULT_ACCEPTANCE = $descriptor
     $env:DARKVAULT_ACCEPTANCE_REQUIRED = '1'
-    if ($NativeAot) { dotnet tests/AcceptanceHost/bin/Release/net10.0/AcceptanceHost.dll $root --check }
+    if ($NativeAot) {
+        dotnet tests/AcceptanceHost/bin/Release/net10.0/AcceptanceHost.dll $root --check
+        & $aotSmoke $descriptor
+    }
     $previousCa = $env:NODE_EXTRA_CA_CERTS
     try {
         $env:NODE_EXTRA_CA_CERTS = (Get-Content -LiteralPath $descriptor -Raw | ConvertFrom-Json).ca

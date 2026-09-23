@@ -23,6 +23,8 @@ executable, SQLite и SPA упаковываются без пересборки
 
 Пакеты собираются один раз, проверяются `tools/check-release.py`, сохраняются
 в artifact `registry-packages` и передаются jobs публикации без пересборки.
+GitHub Release assets получают signed provenance attestations. После выпуска проверьте
+скачанный бинарник командой `gh attestation verify <file> -R Bobsans/DarkVault`.
 PyPI, npm и NuGet используют OIDC. Постоянные API-токены в GitHub не нужны.
 
 ## GitHub: общая настройка
@@ -31,9 +33,12 @@ PyPI, npm и NuGet используют OIDC. Постоянные API-токе�
    Создайте окружение с точным именем `release`.
 2. В Deployment branches and tags выберите Selected branches and tags и добавьте
    правило **Tag** `v*`. Ограничение только веткой `main` не пропустит запуск по тегу.
-3. В этом окружении добавьте **variable**, не secret: `NUGET_USER` — имя вашего
+3. В Required reviewers добавьте ответственных за выпуск и включите запрет self-review,
+   если он доступен в тарифе. Защитите шаблон `v*` ruleset-ом, запрещающим неавторизованный
+   tag update/deletion; release job дополнительно проверяет, что target входит в `main`.
+4. В этом окружении добавьте **variable**, не secret: `NUGET_USER` — имя вашего
    аккаунта на nuget.org, не email. Не предполагается, что оно совпадает с GitHub.
-4. Разрешите GitHub Actions и используемые workflow actions. При наличии rulesets
+5. Разрешите GitHub Actions и используемые workflow actions. При наличии rulesets
    для тегов разрешите workflow создание `clients/go/v*`.
 5. Сохраните изменения workflow в GitHub до выпуска тега. Если branch protection
    требует старые checks, проверьте их имена после переименования workflow.

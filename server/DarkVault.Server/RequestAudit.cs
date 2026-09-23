@@ -7,7 +7,10 @@ namespace DarkVault.Server;
 public sealed class RequestAudit {
     private static readonly Meter Meter = new("DarkVault.Security");
     private static readonly Counter<long> Requests = Meter.CreateCounter<long>("darkvault.http.requests");
+    private static long totalRequests;
     private static readonly object ItemKey = new();
+    public static long TotalRequests => Interlocked.Read(ref totalRequests);
+    public static string PrometheusMetrics() => "# HELP darkvault_http_requests_total Total HTTP requests.\n# TYPE darkvault_http_requests_total counter\ndarkvault_http_requests_total " + TotalRequests.ToString(System.Globalization.CultureInfo.InvariantCulture) + "\n";
     private readonly long started = Stopwatch.GetTimestamp();
     public DateTimeOffset StartedAt { get; } = DateTimeOffset.UtcNow;
     public string TraceId { get; } = Guid.NewGuid().ToString();
@@ -28,6 +31,7 @@ public sealed class RequestAudit {
     internal static RequestAudit Get(HttpContext context) => (RequestAudit)context.Items[ItemKey]!;
     internal static void Attach(HttpContext context, RequestAudit audit) => context.Items[ItemKey] = audit;
     internal AuditEntry Complete(int statusCode) {
+        Interlocked.Increment(ref totalRequests);
         // Fixed-cardinality labels: never use paths, source IPs, token IDs or user input.
         Requests.Add(1, new KeyValuePair<string, object?>("status", statusCode), new("principal_type", PrincipalType));
         return new(DateTimeOffset.UtcNow, Principal, Operation, null, null,
@@ -44,4 +48,4 @@ public sealed class RequestAudit {
 
 internal sealed record AuditResource(string Kind, string Id, string Name, string? BucketId = null, long? Revision = null, string? Type = null);
 internal sealed record AuditDetails(string? Bucket, string? Key, string? TokenId, long? ExpectedRevision,
-    bool? Recursive, AuditResource[] Resources, int? ReturnedCount = null, DarkVault.Client.TokenInfo? Token = null);
+    bool? Recursive, AuditResource[] Resources, int? ReturnedCount = null, StoredTokenInfo? Token = null);

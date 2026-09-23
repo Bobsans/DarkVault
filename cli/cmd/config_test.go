@@ -187,6 +187,11 @@ func TestConnectionURLPrecedence(t *testing.T) {
 	if got.Server != "https://url.example.com" || got.Token != token || got.DefaultBucket != "qa" {
 		t.Fatal("URL did not override split environment")
 	}
+	t.Setenv("DARKVAULT_TOKEN_FILE", "")
+	got = resolve("--server", "https://flag.example.com")
+	if got.Server != "https://flag.example.com" || got.Token != other {
+		t.Fatal("--server reused the DARKVAULT_URL token")
+	}
 	got = resolve("--server", "https://flag.example.com", "--token", other)
 	if got.Server != "https://flag.example.com" || got.Token != other || got.DefaultBucket != "qa" {
 		t.Fatal("flags did not override URL")
@@ -206,6 +211,11 @@ func TestConnectionURLPrecedence(t *testing.T) {
 		t.Fatal("invalid URL accepted or exposed")
 	}
 	t.Setenv("DARKVAULT_URL", "invalid")
+	t.Setenv("DARKVAULT_TOKEN_FILE", "")
+	got = resolve("--server", "https://flag.example.com")
+	if got.Server != "https://flag.example.com" || got.Token != other {
+		t.Fatal("--server reused the DARKVAULT_URL token")
+	}
 	got = resolve("--server", "https://flag.example.com", "--token", other)
 	if got.Server != "https://flag.example.com" || got.Token != other {
 		t.Fatal("explicit flags did not bypass invalid DARKVAULT_URL")

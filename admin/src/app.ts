@@ -59,7 +59,13 @@ const active = (version: number) => authenticated && version === routeVersion;
 
 function clearValue() { $('value-dialog').close(); $('value-text').value = ''; editing = null; }
 function clearConfiguration() { configurationSnapshot = null; $('config-output').textContent = ''; $('config-copy').setAttribute('disabled', ''); $('config-download').setAttribute('disabled', ''); }
+let idleTimer: number | undefined;
+function refreshIdleLock() {
+    window.clearTimeout(idleTimer);
+    if (authenticated) idleTimer = window.setTimeout(() => { lockWorkspace(); void session().catch(() => lockWorkspace()); }, 30 * 60 * 1000);
+}
 function lockWorkspace() {
+    window.clearTimeout(idleTimer); idleTimer = undefined;
     authenticated = false; routeVersion++; clearValue(); tokenExpiry.close(); clearConfiguration(); bucketMetadata = [];
     $('secret-form').reset(); $('password-form').reset();
     for (const id of ['bucket-list', 'secret-list', 'token-list', 'revoked-token-list', 'audit-list']) $(id).replaceChildren();
@@ -101,7 +107,9 @@ function field(parent: HTMLElement, name: string, value: string, title: string, 
 }
 async function plain(path: string, body: object) {
     const response = await fetch(path, { method: 'POST', redirect: 'error', headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrf }, body: JSON.stringify(body), signal: AbortSignal.timeout(30000) });
+    if (response.status === 401) { lockWorkspace(); throw new Error('Session expired. Sign in again.'); }
     if (!response.ok) throw new Error('Request rejected (' + response.status + ')');
+    refreshIdleLock();
     return response.json();
 }
 async function finishMfa(challenge: { mode: string; options: object }): Promise<string[]> {
@@ -125,16 +133,17 @@ function showRecovery(codes: string[]) {
 async function session() {
     const response = await fetch('/admin/api/v1/session', { cache: 'no-store', signal: AbortSignal.timeout(30000) });
     if (!response.ok) throw new Error('Session unavailable');
-    const s: { authenticated: boolean; csrfToken: string } = await response.json(); csrf = s.csrfToken; authenticated = s.authenticated;
+    const s: { authenticated: boolean; csrfToken: string; serverVersion: string | null } = await response.json(); csrf = s.csrfToken; authenticated = s.authenticated;
+    $('server-version').textContent = typeof s.serverVersion === 'string' ? 'Server v' + s.serverVersion : 'Server version —';
     $('login').hidden = authenticated; $('workspace').hidden = !authenticated;
-    if (authenticated) await renderRoute(); else lockWorkspace();
+    if (authenticated) { refreshIdleLock(); await renderRoute(); } else lockWorkspace();
 }
-const MAX_UI_ITEMS = 1000;
 
+// ponytail: screens load complete lists for client-side search and grant pickers. Secrets are capped at
+// 4096 per bucket and ended tokens are purged after a year; add "load more" if bucket counts reach thousands.
 async function all<T>(op: string, parameters: object = {}): Promise<T[]> {
     const items: T[] = []; let cursor: string | null = null;
     do { const page: Page<T> = await api<Page<T>>(op, { ...parameters, limit: 200, cursor });
-        if (items.length + page.items.length > MAX_UI_ITEMS) throw new Error("Too many items for this view; use the paginated API.");
         items.push(...page.items); cursor = page.nextCursor;
     } while (cursor);
     return items;
@@ -306,6 +315,7 @@ document.addEventListener('click', e => {
     const anchor = e.target.closest<HTMLAnchorElement>('a[data-route]'); if (!anchor) return;
     e.preventDefault(); navigate(anchor.pathname + anchor.search).catch(message);
 });
+for (const event of ['pointerdown', 'keydown', 'input']) document.addEventListener(event, refreshIdleLock, { passive: true });
 window.addEventListener('popstate', () => { renderRoute().catch(message); });
 if (['/', '/index.html', '/admin', '/admin/'].includes(location.pathname)) history.replaceState(null, '', '/admin/buckets');
 for (const [prefix, title] of [['secret:', 'Secrets'], ['bucket:', 'Buckets']]) {
@@ -317,7 +327,7 @@ action($('login-form'), 'submit', async () => { const f = $('login-form'); try {
     const challenge = await plain('/admin/login', { username: control(f, 'username').value, password: control(f, 'password').value, recoveryCode: control(f, 'recovery').value || null });
     const codes = await finishMfa(challenge); await session(); showRecovery(codes);
 } finally { control(f, 'password').value = ''; control(f, 'recovery').value = ''; } });
-action($('logout'), 'click', async () => { await plain('/admin/logout', {}); lockWorkspace(); await session(); });
+action($('logout'), 'click', async () => { try { await plain('/admin/logout', {}); } finally { lockWorkspace(); } });
 action($('new-bucket'), 'click', () => { $('bucket-create').open = true; control($('bucket-form'), 'name').focus(); });
 action($('new-token'), 'click', () => { $('token-create').open = true; control($('token-form'), 'name').focus(); });
 action($('bucket-form'), 'submit', async () => { const f = $('bucket-form'); const version = routeVersion; await api('bucket.create', { name: control(f, 'name').value, description: control(f, 'description').value }); f.reset(); $('bucket-create').open = false; if (active(version)) await loadBuckets(version); });

@@ -10,21 +10,31 @@
     <IsAotCompatible>true</IsAotCompatible>
     <EnableRequestDelegateGenerator>true</EnableRequestDelegateGenerator>
     <JsonSerializerIsReflectionEnabledByDefault>false</JsonSerializerIsReflectionEnabledByDefault>
+    <DefineConstants>$(DefineConstants);DARKVAULT_SERVER</DefineConstants>
     <AdminDirectory>$(MSBuildProjectDirectory)/../../admin</AdminDirectory>
   </PropertyGroup>
+  <ItemGroup>
+    <AdminBuildInput Include="$(AdminDirectory)/src/**/*;$(AdminDirectory)/index.html;$(AdminDirectory)/style.css;$(AdminDirectory)/build.mjs;$(AdminDirectory)/package.json;$(AdminDirectory)/pnpm-lock.yaml;$(AdminDirectory)/tsconfig.json;$(MSBuildProjectDirectory)/../../clients/typescript/src/**/*;$(MSBuildProjectDirectory)/../../clients/typescript/package.json;$(MSBuildProjectDirectory)/../../clients/typescript/pnpm-lock.yaml;$(MSBuildProjectDirectory)/../../clients/typescript/tsconfig.json" />
+  </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="../../clients/csharp/DarkVault.Client/DarkVault.Client.csproj" />
+    <PackageReference Include="jose-jwt" Version="5.3.0" />
+    <Compile Include="../../clients/csharp/DarkVault.Client/Wire.cs" Link="Protocol/Wire.cs" />
+    <Compile Include="../../clients/csharp/DarkVault.Client/WireJsonContext.cs" Link="Protocol/WireJsonContext.cs" />
+    <Compile Include="../../clients/csharp/DarkVault.Client/SecretValues.cs" Link="Protocol/SecretValues.cs" />
     <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.12" />
   </ItemGroup>
 
-  <Target Name="BuildAdmin" BeforeTargets="AssignTargetPaths" Condition="'$(DesignTimeBuild)' != 'true'">
+  <Target Name="BuildAdmin" BeforeTargets="AssignTargetPaths" Inputs="@(AdminBuildInput)" Outputs="$(AdminDirectory)/dist/.build.stamp" Condition="'$(DesignTimeBuild)' != 'true' and '$(SkipAdminBuild)' != 'true'">
     <Exec Command="pnpm --dir &quot;$(MSBuildProjectDirectory)/../../clients/typescript&quot; build" />
     <Exec Command="pnpm build" WorkingDirectory="$(AdminDirectory)" />
+    <Touch Files="$(AdminDirectory)/dist/.build.stamp" AlwaysCreate="true" />
+  </Target>
+  <Target Name="IncludeAdminContent" BeforeTargets="AssignTargetPaths" DependsOnTargets="BuildAdmin">
     <ItemGroup>
-      <Content Include="$(AdminDirectory)/dist/index.html" Link="wwwroot/index.html" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
-      <Content Include="$(AdminDirectory)/dist/app.js" Link="wwwroot/app.js" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
-      <Content Include="$(AdminDirectory)/dist/style.css" Link="wwwroot/style.css" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+      <Content Include="$(AdminDirectory)/dist/index.html" Link="wwwroot/index.html" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" Condition="Exists('$(AdminDirectory)/dist/index.html')" />
+      <Content Include="$(AdminDirectory)/dist/app.js" Link="wwwroot/app.js" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" Condition="Exists('$(AdminDirectory)/dist/app.js')" />
+      <Content Include="$(AdminDirectory)/dist/style.css" Link="wwwroot/style.css" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" Condition="Exists('$(AdminDirectory)/dist/style.css')" />
     </ItemGroup>
   </Target>
 

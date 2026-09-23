@@ -49,10 +49,12 @@ token scopes and bucket access. Reading an entire bucket needs `bucket:read`,
 token's allowed creation names. Token issuance and revocation are administrative
 operations, not SDK methods.
 
-Values are strings. Treat returned secrets as sensitive in-memory data; do not
-log values, Authorization headers, or request bodies. TLS verification must stay
-enabled. JWE uses ECDH-ES/P-256/A256GCM in addition to HTTPS; the server still sees
-plaintext secrets, so this is not a zero-knowledge system.
+Basic bucket reads expose string values. Typed-secret and configuration APIs preserve
+JSON scalar types (`string`, `number`, `boolean`, and `null`); use them when loading
+application settings. Treat returned values as sensitive in-memory data; do not log
+values, Authorization headers, or request bodies. TLS verification must stay enabled.
+JWE uses ECDH-ES/P-256/A256GCM in addition to HTTPS; the server still sees plaintext
+secrets, so this is not a zero-knowledge system.
 
 ## Constructor and lifetime
 
@@ -183,10 +185,13 @@ except DarkVaultError as error:
 
 Run this inside the live client context. `DarkVaultError` carries safe metadata,
 not credentials or raw payloads. Status is 0 for a local/transport failure.
+`retry_after` holds the server's `Retry-After` in seconds, or `None` when absent.
 Server errors include `unauthorized`, `forbidden`, `not_found`,
 `already_exists`, `revision_conflict`, and `bucket_not_empty`.
 
 Reads may retry twice on network failures and plaintext 429/5xx responses.
+Any operation may retry a network failure during server key discovery, before its request is sent.
+An idle connection closed by the server is replaced before the request is written.
 `Retry-After` is honored within the deadline. An explicit `unknown_key` response
 permits one key refresh. Uncertain writes are not retried: on `outcome_unknown`,
 read the server state before repeating the mutation.

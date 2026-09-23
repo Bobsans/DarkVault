@@ -205,6 +205,33 @@ func LoadConfiguration(ctx context.Context, url string, target any) error {
 	return client.ReadConfiguration(ctx, "", target)
 }
 
+// rejectCaseCollisions matches C#: encoding/json binds keys case-insensitively, so such paths are ambiguous.
+func rejectCaseCollisions(value any) error {
+	switch current := value.(type) {
+	case map[string]any:
+		// ponytail: bounded O(n²) case-fold scan over one <=1 MiB configuration snapshot.
+		keys := make([]string, 0, len(current))
+		for key := range current {
+			for _, previous := range keys {
+				if strings.EqualFold(key, previous) {
+					return errors.New("configuration property names collide by case")
+				}
+			}
+			keys = append(keys, key)
+			if err := rejectCaseCollisions(current[key]); err != nil {
+				return err
+			}
+		}
+	case []any:
+		for _, item := range current {
+			if err := rejectCaseCollisions(item); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
 // ReadConfiguration binds a nested configuration to a caller-supplied struct or map pointer.
 func (c *Client) ReadConfiguration(ctx context.Context, bucket string, target any) error {
 	values, err := c.ReadTypedBucket(ctx, bucket)
@@ -213,6 +240,9 @@ func (c *Client) ReadConfiguration(ctx context.Context, bucket string, target an
 	}
 	config, err := BuildConfiguration(values, true)
 	if err != nil {
+		return err
+	}
+	if err = rejectCaseCollisions(config); err != nil {
 		return err
 	}
 	data, err := json.Marshal(config)

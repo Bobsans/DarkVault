@@ -1,6 +1,6 @@
-import { encryptRequest, decryptResponse, parseStrict, readBounded } from './protocol.js';
+import { encryptRequest, decryptResponse, parseStrict, readBounded, validateServerKey, retryAfterMs } from './protocol.js';
+import type { ServerKey } from './protocol.js';
 import { DarkVaultError } from './errors.js';
-import type { JWK } from 'jose';
 import { encodeScalar, parseScalar, typedSecrets, buildConfiguration } from './configuration.js';
 import type { SecretType, SecretScalar, Configuration } from './configuration.js';
 export * from './configuration.js';
@@ -20,16 +20,6 @@ export interface TokenInfo {
     creatableBucketNames: string[]; expiresAt: string | null;
 }
 export interface ClientOptions { timeoutMs?: number; fetch?: typeof globalThis.fetch }
-type ServerKey = { protocolVersion: number; serverId: string; serverTime: string; kid: string; publicKey: JWK; notAfter: string; limits: { maxBodyBytes: number; maxPlaintextBytes: number } };
-
-function retryAfterMs(value: string | null): number {
-    if (!value) return 0;
-    const seconds = Number(value);
-    if (Number.isFinite(seconds) && seconds >= 0) return Math.ceil(seconds * 1000);
-    const date = Date.parse(value);
-    return Number.isFinite(date) ? Math.max(0, date - Date.now()) : 0;
-}
-
 function revision(value: number): number {
     if (!Number.isSafeInteger(value) || value < 0) throw new TypeError('Revision must be a nonnegative safe integer.');
     return value;
@@ -52,14 +42,26 @@ function validateData(operation: string, data: unknown): void {
     validateRecord(operation, data);
 }
 function validateRecord(operation: string, data: unknown): void {
-    if (!data || typeof data !== "object" || Array.isArray(data)) throw new DarkVaultError("invalid_response");
+    if (!data || typeof data !== 'object' || Array.isArray(data)) throw new DarkVaultError('invalid_response');
     const object = data as Record<string, unknown>;
-    const required = (...fields: string[]) => { if (fields.some(field => !(field in object) || object[field] === null || object[field] === undefined)) throw new DarkVaultError("invalid_response"); };
-    const stringMap = (value: unknown) => { if (!value || typeof value !== "object" || Array.isArray(value) || Object.values(value).some(entry => typeof entry !== "string")) throw new DarkVaultError("invalid_response"); };
-    if (operation === "bucket.read") { required("bucketId", "revision", "secrets", "types"); stringMap(object.secrets); stringMap(object.types); return; }
-    if (operation === "token.info") { required("id", "name", "scopes", "bucketIds", "allBuckets", "creatableBucketNames"); if (!("expiresAt" in object)) throw new DarkVaultError("invalid_response"); return; }
-    if (operation.startsWith("secret.")) { required("id", "bucketId", "key", "revision", "createdAt", "updatedAt", "type"); if (operation === "secret.read") required("value"); return; }
-    required("id", "name", "description", "revision", "createdAt", "updatedAt");
+    const strings = (...fields: string[]) => fields.every(field => typeof object[field] === 'string');
+    const revision = (field: string) => Number.isSafeInteger(object[field]) && (object[field] as number) >= 0;
+    const stringArray = (field: string) => Array.isArray(object[field]) && object[field].every(item => typeof item === 'string');
+    const date = (field: string) => typeof object[field] === 'string' && Number.isFinite(Date.parse(object[field] as string));
+    if (operation === 'bucket.read') {
+        const types = object.types;
+        if (typeof object.bucketId !== 'string' || !revision('revision') || !object.secrets || typeof object.secrets !== 'object' || Array.isArray(object.secrets) || Object.values(object.secrets).some(value => typeof value !== 'string') || !types || typeof types !== 'object' || Array.isArray(types) || Object.values(types).some(value => !['string', 'number', 'boolean', 'null'].includes(String(value)))) throw new DarkVaultError('invalid_response');
+        return;
+    }
+    if (operation === 'token.info') {
+        if (!strings('id', 'name') || !stringArray('scopes') || !stringArray('bucketIds') || !stringArray('creatableBucketNames') || typeof object.allBuckets !== 'boolean' || !('expiresAt' in object) || !(object.expiresAt === null || date('expiresAt'))) throw new DarkVaultError('invalid_response');
+        return;
+    }
+    if (operation.startsWith('secret.')) {
+        if (!strings('id', 'bucketId', 'key', 'type') || !revision('revision') || !date('createdAt') || !date('updatedAt') || !['string', 'number', 'boolean', 'null'].includes(String(object.type)) || (operation === 'secret.read' && typeof object.value !== 'string')) throw new DarkVaultError('invalid_response');
+        return;
+    }
+    if (!strings('id', 'name', 'description') || !revision('revision') || !date('createdAt') || !date('updatedAt')) throw new DarkVaultError('invalid_response');
 }
 
 export class DarkVaultClient {
@@ -109,11 +111,17 @@ export class DarkVaultClient {
         const timeout = AbortSignal.timeout(this.#timeout);
         const deadline = signal ? AbortSignal.any([signal, timeout]) : timeout;
         const requestOptions: RequestInit = { signal: deadline, redirect: 'error', cache: 'no-store', credentials: 'omit' };
+        const read = operation.endsWith('.read') || operation.endsWith('.get') || operation.endsWith('.list') || operation === 'token.info';
+        let activeRequestId: string | undefined;
         const fetchChecked = async (path: string, options: RequestInit): Promise<Response> => {
             deadline.throwIfAborted();
             let response: Response;
             try { response = await this.#fetch(this.#origin + path, options); }
-            catch { deadline.throwIfAborted(); throw new DarkVaultError(path.endsWith('/execute') ? 'request_outcome_unknown' : 'server_unavailable'); }
+            catch (cause) {
+                if (path.endsWith('/execute')) throw new DarkVaultError(read ? (deadline.aborted ? 'timeout' : 'unavailable') : 'request_outcome_unknown', 0, activeRequestId, 0, cause);
+                if (deadline.aborted) deadline.throwIfAborted();
+                throw new DarkVaultError('server_unavailable', 0, undefined, 0, cause);
+            }
             if (response.redirected || (response.url && new URL(response.url).origin !== this.#origin)) {
                 await response.body?.cancel();
                 throw new DarkVaultError('redirect_rejected', response.status);
@@ -127,24 +135,22 @@ export class DarkVaultClient {
             if (!key || this.#serverKeyUntil <= now || Date.parse(key.notAfter) <= now) {
                 const discovery = await fetchChecked('/api/v1/crypto/key', requestOptions);
                 if (!discovery.ok) { await discovery.body?.cancel(); throw new DarkVaultError('key_unavailable', discovery.status); }
-                const candidate = parseStrict(await readBounded(discovery)) as ServerKey;
-                const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-                if (!candidate || Object.keys(candidate).sort().join(",") !== "kid,limits,notAfter,protocolVersion,publicKey,serverId,serverTime" || candidate.protocolVersion !== 1 || typeof candidate.serverId !== "string" || typeof candidate.serverTime !== "string" || typeof candidate.kid !== "string" || typeof candidate.notAfter !== "string" || !uuid.test(candidate.serverId) || !uuid.test(candidate.kid) || !Number.isFinite(Date.parse(candidate.serverTime)) || !Number.isFinite(Date.parse(candidate.notAfter)) || Date.parse(candidate.notAfter) <= Date.now() ||
-            !candidate.limits || !Number.isSafeInteger(candidate.limits.maxBodyBytes) || candidate.limits.maxBodyBytes < 1 || candidate.limits.maxBodyBytes > 2 * 1024 * 1024 || !Number.isSafeInteger(candidate.limits.maxPlaintextBytes) || candidate.limits.maxPlaintextBytes < 1 || candidate.limits.maxPlaintextBytes > 1536 * 1024 ||
-            candidate.publicKey?.kty !== 'EC' || candidate.publicKey?.crv !== 'P-256' ||
-            Object.keys(candidate.publicKey).sort().join(',') !== 'crv,kty,x,y') throw new DarkVaultError('invalid_server_key');
+                const candidate = validateServerKey(parseStrict(await readBounded(discovery)));
                 key = candidate;
                 this.#serverKey = key;
                 this.#serverKeyUntil = Math.min(Date.now() + 300_000, Date.parse(key.notAfter));
             }
             const request = await encryptRequest(key, operation, parameters, 'data');
+            activeRequestId = request.payload.requestId;
             deadline.throwIfAborted();
             const response = await fetchChecked('/api/v1/execute', {
                 ...requestOptions, method: 'POST', body: request.body,
                 headers: { 'Authorization': `Bearer ${this.#token}`, 'Content-Type': 'application/jose', 'Accept': 'application/jose' }
             });
+            let body: string;
+            try { body = await readBounded(response); }
+            catch (cause) { throw new DarkVaultError(read ? 'timeout' : 'request_outcome_unknown', response.status, request.payload.requestId, 0, cause); }
             if (response.headers.get('Content-Type')?.split(';')[0] !== 'application/jose') {
-                const body = await readBounded(response);
                 let code = 'transport_error';
                 try {
                     const candidate = parseStrict(body) as { error?: { code?: unknown } };
@@ -157,14 +163,14 @@ export class DarkVaultClient {
                 if (response.ok) throw new DarkVaultError('unencrypted_response', response.status, request.payload.requestId, retryAfter);
                 throw new DarkVaultError(code, response.status, request.payload.requestId, retryAfter);
             }
-        let data: unknown;
-            try { data = await decryptResponse(await readBounded(response), request, response.status); }
-            catch (error) {
-                deadline.throwIfAborted();
-                if (error instanceof DarkVaultError) throw error;
-                throw new DarkVaultError('invalid_response', response.status, request.payload.requestId);
+            let data: unknown;
+            try { data = await decryptResponse(body, request, response.status); }
+            catch (cause) {
+                if (deadline.aborted) throw new DarkVaultError(read ? 'timeout' : 'request_outcome_unknown', response.status, request.payload.requestId, 0, cause);
+                if (cause instanceof DarkVaultError) throw cause;
+                throw new DarkVaultError('invalid_response', response.status, request.payload.requestId, 0, cause);
             }
-            deadline.throwIfAborted();
+            if (deadline.aborted) throw new DarkVaultError(read ? 'timeout' : 'request_outcome_unknown', response.status, request.payload.requestId);
             validateData(operation, data);
             return data as T;
         }

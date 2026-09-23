@@ -1,4 +1,5 @@
 using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 using DarkVault.Client;
 using NUnit.Framework;
@@ -12,6 +13,11 @@ public sealed class ProtocolFixtureTests {
         var error = new DarkVaultException(raw, 500);
         Assert.That(error.Code, Is.EqualTo("server_error"));
         Assert.That(error.Message, Does.Not.Contain("secret"));
+    }
+    [Test]
+    public void PublicApiContainsOnlyClientContracts() {
+        var exported = typeof(DarkVaultClient).Assembly.GetExportedTypes().Select(t => t.Name).Order().ToArray();
+        Assert.That(exported, Is.EqualTo(new[] { "Bucket", "BucketSnapshot", "DarkVaultClient", "DarkVaultException", "Page`1", "Secret", "SecretMetadata", "SecretValues", "TokenInfo" }));
     }
     [Test]
     public void RequiredProtocolFieldsCannotBeMissingOrNull() {
@@ -28,7 +34,7 @@ public sealed class ProtocolFixtureTests {
             Q = new ECPoint { X = Wire.Unbase64(jwk.GetProperty("x").GetString()!), Y = Wire.Unbase64(jwk.GetProperty("y").GetString()!) }
         });
         Assert.That(Wire.Decrypt(f.GetProperty("compact").GetString()!, key, f.GetProperty("kid").GetString()!, f.GetProperty("type").GetString()!), Is.EqualTo(f.GetProperty("plaintext").GetString()));
-        Assert.That(Wire.HashToken(f.GetProperty("token").GetString()!), Is.EqualTo(f.GetProperty("tokenHash").GetString()));
+        Assert.That(Convert.ToHexString(SHA256.HashData(Encoding.ASCII.GetBytes(f.GetProperty("token").GetString()!))), Is.EqualTo(f.GetProperty("tokenHash").GetString()));
     }
     [Test]
     public void JweRoundTripAndTamperingAreRejected() {

@@ -1,7 +1,12 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using System.Text.Json.Nodes;
 
+#if DARKVAULT_SERVER
+namespace DarkVault.Server;
+#else
 namespace DarkVault.Client;
+#endif
 
 [JsonSourceGenerationOptions(PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase, GenerationMode = JsonSourceGenerationMode.Metadata)]
 [JsonSerializable(typeof(PublicKey))]
@@ -17,6 +22,7 @@ namespace DarkVault.Client;
 [JsonSerializable(typeof(Page<Bucket>))]
 [JsonSerializable(typeof(Page<SecretMetadata>))]
 [JsonSerializable(typeof(JsonElement))]
+[JsonSerializable(typeof(JsonObject))]
 [JsonSerializable(typeof(Dictionary<string, object>))]
 [JsonSerializable(typeof(Dictionary<string, string>))]
 [JsonSerializable(typeof(object[]))]

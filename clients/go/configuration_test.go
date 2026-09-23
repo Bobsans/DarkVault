@@ -33,4 +33,12 @@ func TestTypedConfiguration(t *testing.T) {
 			t.Fatal("ambiguous configuration accepted")
 		}
 	}
+	for _, value := range []any{map[string]any{"Redis": map[string]any{"Port": 1}, "redis": map[string]any{"Host": "x"}}, []any{map[string]any{"a": 1, "A": 2}}} {
+		if rejectCaseCollisions(value) == nil {
+			t.Fatal("case-colliding configuration accepted")
+		}
+	}
+	if rejectCaseCollisions(map[string]any{"Redis": map[string]any{"Port": 1, "Host": "x"}}) != nil {
+		t.Fatal("distinct configuration names rejected")
+	}
 }

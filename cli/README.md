@@ -41,13 +41,13 @@ disk with owner-only permissions; it is not an encrypted credential store.
 
 | Setting | Flag | Environment | Default |
 | --- | --- | --- | --- |
-| Server | `--server` | `DARKVAULT_SERVER` | Required |
-| Token | `--token` / `--token-file` | `DARKVAULT_TOKEN` / `DARKVAULT_TOKEN_FILE` | Hidden prompt |
+| Server | `--server` | `DARKVAULT_SERVER` or `DARKVAULT_URL` | Required |
+| Token | `--token` / `--token-file` | `DARKVAULT_TOKEN` / `DARKVAULT_TOKEN_FILE`; also from `DARKVAULT_URL` | Hidden prompt |
 | Request timeout | `--timeout` | `DARKVAULT_TIMEOUT` | `30s`; range `1s`–`30s` |
 | Page size | `--limit` on list commands | `DARKVAULT_PAGE_SIZE` | `100`; range 1–200 |
 | Config path | `--config` | `DARKVAULT_CONFIG` | OS user config directory |
 
-Precedence: explicit flags → nonempty environment variables → saved config → defaults.
+Precedence: explicit flags → `DARKVAULT_URL` connection → other nonempty environment variables → saved config → defaults. `--server` selects its own host and never reuses the URL token.
 `--token` and `--token-file` are mutually exclusive. In the environment, the token
 file takes precedence over the token value. Avoid putting secrets in arguments.
 Timeout covers discovery and the command together. HTTPS certificates must be trusted.
@@ -102,7 +102,7 @@ secret changes. `set` defaults to revision 0, not unconditional overwrite.
 
 Most operations print API JSON. `secret get` prints the secret itself, and
 `bucket read` includes plaintext values: keep this output out of shared logs.
-Only JSON is supported by `--format`.
+`bucket read --format` supports `json`, `typed-json`, `nested-json`, and `yaml`; other commands print their normal API output.
 
 ## Run an application with secrets
 

@@ -15,6 +15,7 @@ using NUnit.Framework;
 namespace DarkVault.Server.Tests;
 
 public sealed class HttpTests {
+    private static readonly JsonSerializerOptions TestJson = new(JsonSerializerDefaults.Web);
     [Test, NonParallelizable]
     public async Task HttpsSdkAndAdminAuthenticationWorkEndToEnd() {
         var directory = Path.Combine(Path.GetTempPath(), "dv-http-" + Guid.NewGuid()); Directory.CreateDirectory(directory);
@@ -25,7 +26,7 @@ public sealed class HttpTests {
         using var store = new VaultStore(Path.Combine(directory, "vault.db"), ring);
         store.SetPassword("test-password-for-http-only");
         var admin = new VaultStore.Principal("test", true);
-        JsonElement Run(string op, object p) => JsonSerializer.SerializeToElement(store.Run(admin, op, JsonSerializer.SerializeToElement(p), Guid.NewGuid().ToString()), Wire.Json);
+        JsonElement Run(string op, object p) => JsonSerializer.SerializeToElement(store.Run(admin, op, JsonSerializer.SerializeToElement(p), Guid.NewGuid().ToString()), TestJson);
         var bucket = Run("bucket.create", new { name = "qa" }).GetProperty("id").GetString();
         var token = Run("token.create", new { name = "sdk", scopes = VaultStore.Scopes, bucketIds = new[] { bucket }, allBuckets = false, creatableBucketNames = Array.Empty<string>(), expiresAt = (string?)null }).GetProperty("token").GetString()!;
         await using var app = VaultApplication.Build(["--DARKVAULT_TRUSTED_PROXIES=127.0.0.1,::1"], store, ring, directory);
@@ -44,6 +45,13 @@ public sealed class HttpTests {
                 Assert.That(asset.StatusCode, Is.EqualTo(HttpStatusCode.OK), path);
                 Assert.That(asset.Headers.CacheControl?.NoStore, Is.True, path);
                 Assert.That(asset.Headers.Contains("Content-Security-Policy"), Is.True, path);
+            }
+            using (var proxied = await http.GetAsync(url + "/metrics"))
+                Assert.That(proxied.StatusCode, Is.EqualTo(HttpStatusCode.NotFound), "metrics through a proxy");
+            using (var local = new HttpClient(new HttpClientHandler { ServerCertificateCustomValidationCallback = (_, c, _, _) => c?.Thumbprint == cert.Thumbprint })) {
+                using var metrics = await local.GetAsync(url + "/metrics");
+                Assert.That(metrics.StatusCode, Is.EqualTo(HttpStatusCode.OK));
+                Assert.That(await metrics.Content.ReadAsStringAsync(), Does.Contain("darkvault_"));
             }
             var html = await http.GetStringAsync(url + "/");
             Assert.That(html, Does.Contain("id=\"login-form\"").And.Contain("src=\"/app.js\""));
@@ -125,11 +133,20 @@ public sealed class HttpTests {
             Assert.That(rejectedConfiguration.Sources, Is.Empty);
             using var anonymous = await http.PostAsJsonAsync(url + "/admin/login", new { username = "admin", password = "test-password-for-http-only" }); Assert.That(anonymous.StatusCode, Is.EqualTo(HttpStatusCode.BadRequest));
             var session = await http.GetFromJsonAsync<JsonElement>(url + "/admin/api/v1/session");
+            Assert.That(session.GetProperty("authenticated").GetBoolean(), Is.False);
+            Assert.That(session.GetProperty("serverVersion").ValueKind, Is.EqualTo(JsonValueKind.Null));
             http.DefaultRequestHeaders.Add("X-CSRF-Token", session.GetProperty("csrfToken").GetString());
             using var login = await http.PostAsJsonAsync(url + "/admin/login", new { username = "admin", password = "test-password-for-http-only" }); Assert.That(login.IsSuccessStatusCode, Is.True);
             var pendingSession = await http.GetFromJsonAsync<JsonElement>(url + "/admin/api/v1/session"); Assert.That(pendingSession.GetProperty("authenticated").GetBoolean(), Is.False);
             await passkey.Finish(http, url, login);
-            var loggedIn = await http.GetFromJsonAsync<JsonElement>(url + "/admin/api/v1/session"); Assert.That(loggedIn.GetProperty("authenticated").GetBoolean(), Is.True);
+            using var authenticatedSessionResponse = await http.GetAsync(url + "/admin/api/v1/session");
+            var traceId = authenticatedSessionResponse.Headers.GetValues("X-Request-Id").Single();
+            Assert.That(Guid.TryParse(traceId, out _), Is.True);
+            var loggedIn = JsonSerializer.Deserialize<JsonElement>(await authenticatedSessionResponse.Content.ReadAsStringAsync());
+            Assert.That(loggedIn.GetProperty("authenticated").GetBoolean(), Is.True);
+            Assert.That(loggedIn.GetProperty("serverVersion").GetString(), Is.Not.Empty);
+            var correlation = Run("audit.list", new { search = traceId, limit = 10 });
+            Assert.That(correlation.GetProperty("items").EnumerateArray().Any(item => item.GetProperty("traceId").GetString() == traceId), Is.True);
             using var noToken = await http.PostAsync(url + "/api/v1/execute", new StringContent("invalid", Encoding.UTF8, "application/jose")); Assert.That(noToken.StatusCode, Is.EqualTo(HttpStatusCode.Unauthorized));
             using (var malformed = new HttpRequestMessage(HttpMethod.Post, url + "/api/v1/execute")) {
                 malformed.Headers.Authorization = new("Bearer", token);
@@ -167,7 +184,7 @@ public sealed class HttpTests {
             Assert.That(completed.GetProperty("requestId").GetString(), Is.EqualTo(created.GetProperty("requestId").GetString()));
             Assert.That(completed.GetProperty("statusCode").GetInt32(), Is.EqualTo(201));
             Assert.That(completed.GetProperty("principalName").GetString(), Is.EqualTo("sdk"));
-            var auditJson = JsonSerializer.Serialize(audit, Wire.Json);
+            var auditJson = JsonSerializer.Serialize(audit, TestJson);
             foreach (var sensitive in new[] { token, "test-password-for-http-only", "new-test-password-for-http-only", "private-malformed-body", "private-query-value", "秘密", "updated", session.GetProperty("csrfToken").GetString()! })
                 Assert.That(auditJson, Does.Not.Contain(sensitive));
         } finally { await app.StopAsync(); store.Dispose(); Directory.Delete(directory, true); }

@@ -23,7 +23,9 @@ public sealed class ConfigurationTests {
         values["Redis"] = SecretValues.Parse("conflict"); Assert.Throws<ArgumentException>(() => SecretValues.Configuration(values));
         Assert.Throws<ArgumentException>(() => SecretValues.Configuration(new Dictionary<string, JsonElement> { ["Redis"] = SecretValues.Parse("x"), ["redis:Port"] = SecretValues.Parse("1") }));
         Assert.That(SecretValues.Configuration(values, false).ContainsKey("Redis:Port"), Is.True);
-        foreach (var path in new[] { "A::B", "A:", ":A", "A\\x", "A\\", string.Join(":", Enumerable.Repeat("a", 17)) })
+        SecretValues.ValidateNativeConfigurationPaths(new[] { "A\\x", "A\\" });
+        Assert.Throws<ArgumentException>(() => SecretValues.ValidateNativeConfigurationPaths(new[] { "Redis:Port", "redis" }));
+        foreach (var path in new[] { "A::B", "A:", ":A", string.Join(":", Enumerable.Repeat("a", 17)) })
             Assert.Throws<ArgumentException>(() => SecretValues.Configuration(new Dictionary<string, JsonElement> { [path] = SecretValues.Parse("x") }));
     }
 }

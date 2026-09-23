@@ -10,6 +10,7 @@ namespace DarkVault.Server.Tests;
 
 [TestFixture]
 public sealed class VaultStoreTests {
+    private static readonly JsonSerializerOptions TestJson = new(JsonSerializerDefaults.Web);
     private string directory = null!;
     private KeyRing ring = null!;
     private VaultStore store = null!;
@@ -21,7 +22,7 @@ public sealed class VaultStoreTests {
     }
     [TearDown] public void TearDown() { store.Dispose(); Directory.Delete(directory, true); }
     private T Run<T>(string operation, object args, VaultStore.Principal? p = null) =>
-        JsonSerializer.SerializeToElement(store.Run(p ?? admin, operation, JsonSerializer.SerializeToElement(args, Wire.Json), Guid.NewGuid().ToString()), Wire.Json).Deserialize<T>(Wire.ResponseJson)!;
+        JsonSerializer.SerializeToElement(store.Run(p ?? admin, operation, JsonSerializer.SerializeToElement(args, TestJson), Guid.NewGuid().ToString()), TestJson).Deserialize<T>(TestJson)!;
     private string Token(string[] scopes, string[] buckets, DateTimeOffset? expiry = null, bool all = false, string[]? names = null) =>
         Run<JsonElement>("token.create", new { name = "test", scopes, bucketIds = buckets, allBuckets = all, creatableBucketNames = names ?? [], expiresAt = expiry }).GetProperty("token").GetString()!;
     [Test]
@@ -132,6 +133,104 @@ public sealed class VaultStoreTests {
         Assert.Throws<InvalidOperationException>(() => new KeyRing(Path.Combine(directory, "missing"), false));
     }
     [Test]
+    public void ExistingEntrySchemaMigratesAndBackfillsSnapshotSizesOnFirstWrite() {
+        var bucket = Run<Bucket>("bucket.create", new { name = "legacy_size" });
+        var secret = Run<SecretMetadata>("secret.create", new { bucket = bucket.Name, key = "value", value = "old" });
+        store.Dispose();
+        using (var database = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = Path.Combine(directory, "vault.db"), Pooling = false }.ToString())) {
+            database.Open();
+            foreach (var column in new[] { "type_pair_bytes", "secret_pair_bytes", "value_json_bytes" }) {
+                using var command = database.CreateCommand(); command.CommandText = "ALTER TABLE entries DROP COLUMN " + column; command.ExecuteNonQuery();
+            }
+        }
+        store = new(Path.Combine(directory, "vault.db"), ring);
+        var updated = Run<SecretMetadata>("secret.update", new { bucket = bucket.Name, key = "value", value = "new-value", expectedRevision = secret.Revision });
+        Assert.That(Run<Secret>("secret.read", new { bucket = bucket.Name, key = "value" }).Value, Is.EqualTo("new-value"));
+        using var check = (SqliteConnection)typeof(VaultStore).GetField("db", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!.GetValue(store)!;
+        using var verify = check.CreateCommand(); verify.CommandText = "SELECT value_json_bytes,secret_pair_bytes FROM entries WHERE id=$id"; verify.Parameters.AddWithValue("$id", updated.Id);
+        using var reader = verify.ExecuteReader(); Assert.That(reader.Read(), Is.True);
+        Assert.That(reader.GetInt64(0), Is.GreaterThan(0)); Assert.That(reader.GetInt64(1), Is.GreaterThan(0));
+    }
+
+    [Test]
+    public void UpdatesWithoutTypeKeepTheStoredType() {
+        Run<Bucket>("bucket.create", new { name = "typed" });
+        var created = Run<SecretMetadata>("secret.create", new { bucket = "typed", key = "Port", value = "6379", type = "number" });
+        var updated = Run<SecretMetadata>("secret.update", new { bucket = "typed", key = "Port", value = "6380", expectedRevision = created.Revision });
+        var set = Run<SecretMetadata>("secret.set", new { bucket = "typed", key = "Port", value = "6381", expectedRevision = updated.Revision });
+        Assert.That((updated.Type, set.Type), Is.EqualTo(("number", "number")));
+        Assert.That(Run<SecretMetadata>("secret.set", new { bucket = "typed", key = "Name", value = "x", expectedRevision = 0 }).Type, Is.EqualTo("string"));
+        Assert.That(Assert.Throws<VaultFault>(() => Run<SecretMetadata>("secret.update", new { bucket = "typed", key = "Port", value = "text", expectedRevision = set.Revision }))!.Status, Is.EqualTo(400));
+    }
+
+    [Test]
+    public void OperationsUseTheCurrentTokenRecordInsteadOfTheAuthenticationSnapshot() {
+        var qa = Run<Bucket>("bucket.create", new { name = "qa" });
+        var principal = store.Authenticate(Token(["bucket:read", "bucket:create"], [qa.Id], names: ["new_one"]));
+        Assert.That(Run<Bucket>("bucket.get", new { bucket = "qa" }, principal).Id, Is.EqualTo(qa.Id));
+        Run<JsonElement>("token.revoke", new { id = principal.Id });
+        // The principal was authenticated before revocation; Run must still refuse it.
+        Assert.That(Assert.Throws<VaultFault>(() => Run<Bucket>("bucket.get", new { bucket = "qa" }, principal))!.Status, Is.EqualTo(401));
+        Assert.That(Assert.Throws<VaultFault>(() => Run<Bucket>("bucket.create", new { name = "new_one" }, principal))!.Status, Is.EqualTo(401));
+    }
+
+    [Test]
+    public void MaintenanceAppliesAuditRetentionAndDropsLongEndedTokens() {
+        string Create(string name) => Run<JsonElement>("token.create", new { name, scopes = Array.Empty<string>(), bucketIds = Array.Empty<string>(), allBuckets = false, creatableBucketNames = Array.Empty<string>(), expiresAt = (string?)null })
+            .GetProperty("metadata").GetProperty("info").GetProperty("id").GetString()!;
+        var ids = new[] { "fresh", "recently_revoked", "old_revoked", "old_expired", "old_uncapped" }.ToDictionary(n => n, Create);
+        store.Dispose();
+        string Ago(int days) => DateTimeOffset.UtcNow.AddDays(-days).ToString("O");
+        using (var database = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = Path.Combine(directory, "vault.db"), Pooling = false }.ToString())) {
+            database.Open();
+            void Sql(string text, params (string Name, object? Value)[] values) {
+                using var command = database.CreateCommand(); command.CommandText = text;
+                foreach (var (name, value) in values) command.Parameters.AddWithValue(name, value ?? DBNull.Value);
+                command.ExecuteNonQuery();
+            }
+            Sql("UPDATE tokens SET json=json_set(json,'$.revokedAt',$at) WHERE id=$id", ("$at", Ago(10)), ("$id", ids["recently_revoked"]));
+            Sql("UPDATE tokens SET json=json_set(json,'$.revokedAt',$at) WHERE id=$id", ("$at", Ago(400)), ("$id", ids["old_revoked"]));
+            Sql("UPDATE tokens SET json=json_set(json,'$.createdAt',$created,'$.info.expiresAt',$at) WHERE id=$id", ("$created", Ago(500)), ("$at", Ago(400)), ("$id", ids["old_expired"]));
+            // Without an explicit expiry the one-year lifetime cap still ends the token.
+            Sql("UPDATE tokens SET json=json_set(json,'$.createdAt',$created,'$.info.expiresAt',json('null')) WHERE id=$id", ("$created", Ago(3 * 365)), ("$id", ids["old_uncapped"]));
+            Sql("UPDATE audit SET time=$at", ("$at", Ago(40)));
+        }
+        store = new(Path.Combine(directory, "vault.db"), ring) { AuditRetention = TimeSpan.FromDays(30) };
+        Run<JsonElement>("bucket.list", new { });
+        var remaining = Run<Page<VaultStore.TokenRecord>>("token.list", new { }).Items.Select(t => t.Info.Id);
+        Assert.That(remaining, Is.EquivalentTo(new[] { ids["fresh"], ids["recently_revoked"] }));
+        var audit = Run<Page<JsonElement>>("audit.list", new { limit = 200 }).Items;
+        Assert.That(audit.Select(e => e.GetProperty("operation").GetString()), Is.EquivalentTo(new[] { "bucket.list", "token.list" }));
+    }
+
+    [Test]
+    public void SnapshotSizeIsStoredAndKeyUseReservationsSkipUnusedRangeAfterRestart() {
+        var bucket = Run<Bucket>("bucket.create", new { name = "size_cache" });
+        const string value = "line\nsecret-秘密";
+        Run<SecretMetadata>("secret.create", new { bucket = bucket.Name, key = "A:B", value });
+        var db = (SqliteConnection)typeof(VaultStore).GetField("db", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!.GetValue(store)!;
+        using (var command = db.CreateCommand()) {
+            command.CommandText = "SELECT value_json_bytes FROM entries WHERE bucket=$bucket AND name=$key";
+            command.Parameters.AddWithValue("$bucket", bucket.Id); command.Parameters.AddWithValue("$key", "A:B");
+            Assert.That(command.ExecuteScalar(), Is.EqualTo(Encoding.UTF8.GetByteCount(JsonSerializer.Serialize(value, TestJson))));
+        }
+
+        var keyringPath = Path.Combine(directory, "usage-keyring.json");
+        using (var usageRing = new KeyRing(keyringPath, true)) {
+            var metadata = new SecretMetadata(Guid.NewGuid().ToString(), bucket.Id, "usage", 1, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow, "string");
+            for (var i = 0; i < 1; i++) _ = usageRing.Encrypt("value", metadata with { Revision = i + 1 });
+            using var state = JsonDocument.Parse(File.ReadAllText(keyringPath));
+            Assert.That(state.RootElement.GetProperty("data")[0].GetProperty("uses").GetInt64(), Is.EqualTo(1024));
+        }
+        using (var reopened = new KeyRing(keyringPath, false)) {
+            var metadata = new SecretMetadata(Guid.NewGuid().ToString(), bucket.Id, "usage", 1, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow, "string");
+            _ = reopened.Encrypt("value", metadata);
+            using var state = JsonDocument.Parse(File.ReadAllText(keyringPath));
+            Assert.That(state.RootElement.GetProperty("data")[0].GetProperty("uses").GetInt64(), Is.EqualTo(2048));
+        }
+    }
+
+    [Test]
     public void CorruptActiveDataKeyIsRejectedBeforeOpeningTheStore() {
         var path = Path.Combine(directory, "broken-keyring.json");
         using (new KeyRing(path, true)) { }
@@ -148,6 +247,51 @@ public sealed class VaultStoreTests {
         store.Reserve(admin, request); store.Dispose(); store = new(Path.Combine(directory, "vault.db"), ring);
         Assert.That(Assert.Throws<VaultFault>(() => store.Reserve(admin, request))!.Code, Is.EqualTo("replay_detected"));
     }
+    [Test]
+    public async Task ConcurrentReplayRevocationAndBucketReadsRemainConsistent() {
+        var bucket = Run<Bucket>("bucket.create", new { name = "concurrent" });
+        var token = Token(["bucket:read", "secret:read", "secret:list", "secret:write"], [bucket.Id]);
+        var principal = store.Authenticate(token);
+        using var reply = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+        var request = new VaultRequest(1, Guid.NewGuid().ToString(), DateTimeOffset.UtcNow, ring.ServerId,
+            "data", "bucket.list", JsonSerializer.SerializeToElement(new { }), Wire.Export(reply));
+        var accepted = 0;
+        var rejected = 0;
+        Parallel.For(0, 32, _ => {
+            try { store.Reserve(principal, request); Interlocked.Increment(ref accepted); } catch (VaultFault fault) when (fault.Code == "replay_detected") { Interlocked.Increment(ref rejected); }
+        });
+        Assert.That(accepted, Is.EqualTo(1));
+        Assert.That(rejected, Is.EqualTo(31));
+
+        var secret = Run<SecretMetadata>("secret.create", new { bucket = bucket.Name, key = "state", value = "0" });
+        var writer = Task.Run(() => {
+            var revision = secret.Revision;
+            for (var i = 1; i <= 100; i++)
+                revision = Run<SecretMetadata>("secret.update", new { bucket = bucket.Name, key = "state", value = i.ToString(), expectedRevision = revision }).Revision;
+        });
+        var reader = Task.Run(() => {
+            for (var i = 0; i < 100; i++) {
+                var snapshot = Run<BucketSnapshot>("bucket.read", new { bucket = bucket.Name }, principal);
+                Assert.That(int.TryParse(snapshot.Secrets["state"], out _), Is.True);
+                Assert.That(snapshot.Revision, Is.GreaterThan(0));
+            }
+        });
+        await Task.WhenAll(writer, reader);
+
+        var stale = store.Authenticate(token);
+        using var start = new Barrier(2);
+        var concurrentRead = Task.Run(() => {
+            start.SignalAndWait();
+            for (var i = 0; i < 32; i++) {
+                try { _ = Run<BucketSnapshot>("bucket.read", new { bucket = bucket.Name }, stale); } catch (VaultFault fault) when (fault.Status == 401) { break; }
+            }
+        });
+        var concurrentRevoke = Task.Run(() => { start.SignalAndWait(); Run<JsonElement>("token.revoke", new { id = stale.Id }); });
+        await Task.WhenAll(concurrentRead, concurrentRevoke);
+        Assert.That(Assert.Throws<VaultFault>(() => Run<BucketSnapshot>("bucket.read", new { bucket = bucket.Name }, stale))!.Status,
+            Is.EqualTo(401));
+    }
+
     [Test]
     public void DiskFullRollsBackSecretAndBucketRevision() {
         var bucket = Run<Bucket>("bucket.create", new { name = "qa" });
@@ -194,7 +338,7 @@ public sealed class VaultStoreTests {
         Assert.That(Entry("token.revoke").GetProperty("details").GetProperty("tokenId").GetString(), Is.EqualTo(actor.Id));
         Assert.That(Entry("token.create").GetProperty("details").GetProperty("token").GetProperty("scopes")[0].GetString(), Is.EqualTo("secret:read"));
         Assert.That(Entry("token.create").GetProperty("bucketId").ValueKind, Is.EqualTo(JsonValueKind.Null));
-        var json = JsonSerializer.Serialize(audit, Wire.Json);
+        var json = JsonSerializer.Serialize(audit, TestJson);
         Assert.That(json, Does.Not.Contain("private-audit-value").And.Not.Contain("private-description").And.Not.Contain(token));
         store.Dispose(); store = new(Path.Combine(directory, "vault.db"), ring);
         Assert.That(Run<Page<JsonElement>>("audit.list", new { limit = 200 }).Items.Count, Is.GreaterThan(audit.Items.Count));
@@ -230,7 +374,7 @@ public sealed class VaultStoreTests {
         var key = state.RootElement.GetProperty("data")[0];
         var plain = Encoding.UTF8.GetBytes("legacy-value"); var nonce = RandomNumberGenerator.GetBytes(12); var cipher = new byte[plain.Length]; var tag = new byte[16];
         using (var aes = new AesGcm(Convert.FromBase64String(key.GetProperty("key").GetString()!), 16))
-            aes.Encrypt(nonce, plain, cipher, tag, Encoding.UTF8.GetBytes(JsonSerializer.Serialize(new object[] { 1, metadata.Id, metadata.BucketId, metadata.Key, metadata.Revision }, Wire.Json)));
+            aes.Encrypt(nonce, plain, cipher, tag, Encoding.UTF8.GetBytes(JsonSerializer.Serialize(new object[] { 1, metadata.Id, metadata.BucketId, metadata.Key, metadata.Revision }, TestJson)));
         var encrypted = new EncryptedValue(1, key.GetProperty("id").GetString()!, Wire.Base64(nonce), Wire.Base64(tag), Wire.Base64(cipher));
         Assert.That(ring.Decrypt(encrypted, metadata), Is.EqualTo("legacy-value"));
         Assert.Throws<CryptographicException>(() => ring.Decrypt(encrypted, metadata with { Type = "number" }));
@@ -280,7 +424,7 @@ public sealed class VaultStoreTests {
         var entries = new List<JsonElement>();
         do {
             var page = Run<Page<JsonElement>>("audit.list", new { cursor, limit = 200 });
-            Assert.That(Encoding.UTF8.GetByteCount(JsonSerializer.Serialize(page, Wire.Json)), Is.LessThan(Wire.MaxPlaintext - 2048));
+            Assert.That(Encoding.UTF8.GetByteCount(JsonSerializer.Serialize(page, TestJson)), Is.LessThan(Wire.MaxPlaintext - 2048));
             entries.AddRange(page.Items); cursor = page.NextCursor;
         } while (cursor is not null);
         var reads = entries.Where(e => e.GetProperty("operation").GetString() == "bucket.read").GroupBy(e => e.GetProperty("requestId").GetString()).ToArray();

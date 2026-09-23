@@ -2,7 +2,11 @@ using System.Globalization;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 
+#if DARKVAULT_SERVER
+namespace DarkVault.Server;
+#else
 namespace DarkVault.Client;
+#endif
 
 public static class SecretValues {
     public static string Normalize(string value, string type) {
@@ -32,11 +36,13 @@ public static class SecretValues {
         };
         return (Normalize(type == "string" ? value.GetString()! : value.GetRawText(), type), type);
     }
-    public static void ValidateConfigurationPaths(IEnumerable<string> keys) {
+    public static void ValidateConfigurationPaths(IEnumerable<string> keys) => ValidatePaths(keys, Path);
+    public static void ValidateNativeConfigurationPaths(IEnumerable<string> keys) => ValidatePaths(keys, NativePath);
+    private static void ValidatePaths(IEnumerable<string> keys, Func<string, string[]> parse) {
         var paths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var leaves = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var key in keys) {
-            var parts = Path(key); var prefix = new System.Text.StringBuilder();
+            var parts = parse(key); var prefix = new System.Text.StringBuilder();
             for (var i = 0; i < parts.Length; i++) {
                 if (i > 0) prefix.Append(':');
                 prefix.Append(parts[i]); var current = prefix.ToString();
@@ -80,5 +86,10 @@ public static class SecretValues {
         parts.Add(part.ToString());
         if (escaped || parts.Count > 16 || parts.Any(p => p.Length == 0)) throw new ArgumentException("Invalid configuration path.");
         return parts.ToArray();
+    }
+    private static string[] NativePath(string key) {
+        var parts = key.Split(':');
+        if (parts.Length > 16 || parts.Any(p => p.Length == 0)) throw new ArgumentException("Invalid configuration path.");
+        return parts;
     }
 }

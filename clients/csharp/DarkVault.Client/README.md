@@ -48,10 +48,12 @@ token scopes and bucket access. Reading an entire bucket needs `bucket:read`,
 token's allowed creation names. Token issuance and revocation are administrative
 operations, not SDK methods.
 
-Values are strings. Treat returned secrets as sensitive in-memory data; do not
-log values, Authorization headers, or request bodies. TLS verification must stay
-enabled. JWE uses ECDH-ES/P-256/A256GCM in addition to HTTPS; the server still sees
-plaintext secrets, so this is not a zero-knowledge system.
+Basic bucket reads expose string values. Typed-secret and configuration APIs preserve
+JSON scalar types (`string`, `number`, `boolean`, and `null`); use them when loading
+application settings. Treat returned values as sensitive in-memory data; do not log
+values, Authorization headers, or request bodies. TLS verification must stay enabled.
+JWE uses ECDH-ES/P-256/A256GCM in addition to HTTPS; the server still sees plaintext
+secrets, so this is not a zero-knowledge system.
 
 ## Required scopes
 
@@ -85,17 +87,20 @@ in `Task<T>`; delete methods return `Task`.
 | `ListBucketsAsync(cursor = null, limit = 100)` | `Page<Bucket>` |
 | `ReadBucketAsync(bucket)` | `IReadOnlyDictionary<string, string?>` |
 | `ReadBucketSnapshotAsync(bucket)` | `BucketSnapshot` |
+| `ReadTypedBucketAsync(bucket)` | `IReadOnlyDictionary<string, JsonElement>` with typed values |
+| `ReadConfigurationAsync<T>(bucket, typeInfo)` | Nested configuration as `T` |
 | `UpdateBucketAsync(bucket, description, expectedRevision)` | `Bucket` |
 | `RenameBucketAsync(bucket, name, expectedRevision)` | `Bucket` |
 | `DeleteBucketAsync(bucket, expectedRevision, recursive = false)` | No value |
-| `AddSecretAsync(bucket, key, value)` | `SecretMetadata` |
+| `AddSecretAsync(bucket, key, value)` | `SecretMetadata`; `value` is a `string` or a typed `JsonElement` |
 | `ReadSecretAsync(bucket, key)` | `Secret` |
 | `ListSecretsAsync(bucket, cursor = null, limit = 100)` | `Page<SecretMetadata>` |
 | `UpdateSecretAsync(bucket, key, value, expectedRevision)` | `SecretMetadata` |
 | `SetSecretAsync(bucket, key, value, expectedRevision = 0)` | `SecretMetadata` |
 | `DeleteSecretAsync(bucket, key, expectedRevision)` | No value |
 | `GetTokenInfoAsync()` | `TokenInfo` |
-| `ExecuteAsync<T>(operation, parameters)` | Deserialized `T`; advanced wire API |
+| `ExecuteAsync<T>(operation, parameters)` | Deserialized `T`; advanced wire API, uses reflection |
+| `ExecuteAsync<T>(operation, JsonElement parameters, typeInfo)` | Deserialized `T`; Native AOT-safe wire API |
 
 Names, keys, values, and descriptions are strings; revisions are `long`, limits
 are `int`, and cursors are nullable strings.
@@ -167,12 +172,15 @@ try {
 ```
 
 `DarkVaultException` exposes `Code`, `Status` (0 for local/transport failures),
-and optional `RequestId`. Invalid constructor arguments can throw argument
+optional `RequestId`, and `RetryAfter` from the server's `Retry-After` header
+(`null` when absent). Invalid constructor arguments can throw argument
 exceptions. Cancellation/deadline expiry can throw `OperationCanceledException`.
 
 Each operation has a 30-second deadline, including discovery and retries. Pass a
 cancellation token to shorten it. Reads may retry twice after network errors or
-retryable 429/5xx responses. An explicit `unknown_key` response permits one key
+retryable 429/5xx responses. Any operation may retry a network failure during
+server key discovery, which happens before the request is sent; such failures
+report `unavailable`. An explicit `unknown_key` response permits one key
 refresh. Uncertain writes are not automatically retried: on `outcome_unknown`,
 or cancellation after a write was sent, inspect current state before retrying.
 

@@ -1,4 +1,3 @@
-using DarkVault.Client;
 using Microsoft.AspNetCore.Antiforgery;
 using Microsoft.AspNetCore.Identity;
 

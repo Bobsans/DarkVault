@@ -4,6 +4,7 @@ using System.Net.Http.Json;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 
 namespace DarkVault.Client;
 
@@ -12,8 +13,8 @@ public sealed class DarkVaultClient : IDisposable {
     private readonly bool ownsHttp;
     private readonly Uri endpoint;
     private readonly string token;
-    private CryptoKey? key;
-    private DateTimeOffset keyFetched;
+    private sealed record CachedKey(CryptoKey Value, DateTimeOffset FetchedAt);
+    private CachedKey? key;
 
     public DarkVaultClient(string server, string token, HttpClient? httpClient = null) {
         endpoint = new Uri(server.Contains("://", StringComparison.Ordinal) ? server : "https://" + server);
@@ -57,12 +58,13 @@ public sealed class DarkVaultClient : IDisposable {
     public void Dispose() { if (ownsHttp) http.Dispose(); }
 
     public Task<Bucket> AddBucketAsync(string name, string description = "", CancellationToken cancellationToken = default) =>
-        ExecuteAsync<Bucket>("bucket.create", new { name, description }, cancellationToken);
-    public Task<Bucket> GetBucketAsync(string bucket, CancellationToken cancellationToken = default) => ExecuteAsync<Bucket>("bucket.get", new { bucket }, cancellationToken);
+        ExecuteTypedAsync("bucket.create", Parameters(("name", JsonValue.Create(name)), ("description", JsonValue.Create(description))), WireJsonContext.Default.Bucket, cancellationToken);
+    public Task<Bucket> GetBucketAsync(string bucket, CancellationToken cancellationToken = default) =>
+        ExecuteTypedAsync("bucket.get", Parameters(("bucket", JsonValue.Create(bucket))), WireJsonContext.Default.Bucket, cancellationToken);
     public Task<Page<Bucket>> ListBucketsAsync(string? cursor = null, int limit = 100, CancellationToken cancellationToken = default) =>
-        ExecuteAsync<Page<Bucket>>("bucket.list", new { cursor, limit }, cancellationToken);
+        ExecuteTypedAsync("bucket.list", Parameters(("cursor", JsonValue.Create(cursor)), ("limit", JsonValue.Create(limit))), WireJsonContext.Default.PageBucket, cancellationToken);
     public Task<BucketSnapshot> ReadBucketSnapshotAsync(string? bucket = null, CancellationToken cancellationToken = default) =>
-        ExecuteAsync<BucketSnapshot>("bucket.read", new { bucket = ResolveBucket(bucket) }, cancellationToken);
+        ExecuteTypedAsync("bucket.read", Parameters(("bucket", JsonValue.Create(ResolveBucket(bucket)))), WireJsonContext.Default.BucketSnapshot, cancellationToken);
     public async Task<IReadOnlyDictionary<string, string?>> ReadBucketAsync(string? bucket = null, CancellationToken cancellationToken = default) =>
         (await ReadBucketSnapshotAsync(bucket, cancellationToken)).Secrets;
     public async Task<IReadOnlyDictionary<string, JsonElement>> ReadTypedBucketAsync(string? bucket = null, CancellationToken cancellationToken = default) =>
@@ -72,95 +74,123 @@ public sealed class DarkVaultClient : IDisposable {
     public Task<T> ReadConfigurationAsync<T>(System.Text.Json.Serialization.Metadata.JsonTypeInfo<T> typeInfo, CancellationToken cancellationToken = default) =>
         ReadConfigurationAsync(ResolveBucket(null), typeInfo, cancellationToken);
     public Task<Bucket> UpdateBucketAsync(string bucket, string description, long expectedRevision, CancellationToken cancellationToken = default) =>
-        ExecuteAsync<Bucket>("bucket.update", new { bucket, description, expectedRevision }, cancellationToken);
+        ExecuteTypedAsync("bucket.update", Parameters(("bucket", JsonValue.Create(bucket)), ("description", JsonValue.Create(description)), ("expectedRevision", JsonValue.Create(expectedRevision))), WireJsonContext.Default.Bucket, cancellationToken);
     public Task<Bucket> RenameBucketAsync(string bucket, string name, long expectedRevision, CancellationToken cancellationToken = default) =>
-        ExecuteAsync<Bucket>("bucket.update", new { bucket, name, expectedRevision }, cancellationToken);
+        ExecuteTypedAsync("bucket.update", Parameters(("bucket", JsonValue.Create(bucket)), ("name", JsonValue.Create(name)), ("expectedRevision", JsonValue.Create(expectedRevision))), WireJsonContext.Default.Bucket, cancellationToken);
     public async Task DeleteBucketAsync(string bucket, long expectedRevision, bool recursive = false, CancellationToken cancellationToken = default) =>
-        _ = await ExecuteAsync<JsonElement>("bucket.delete", new { bucket, expectedRevision, recursive }, cancellationToken);
+        _ = await ExecuteTypedAsync("bucket.delete", Parameters(("bucket", JsonValue.Create(bucket)), ("expectedRevision", JsonValue.Create(expectedRevision)), ("recursive", JsonValue.Create(recursive))), WireJsonContext.Default.JsonElement, cancellationToken);
     public Task<SecretMetadata> AddSecretAsync(string bucket, string key, string value, CancellationToken cancellationToken = default) =>
-        ExecuteAsync<SecretMetadata>("secret.create", new { bucket, key, value }, cancellationToken);
+        ExecuteTypedAsync("secret.create", Parameters(("bucket", JsonValue.Create(bucket)), ("key", JsonValue.Create(key)), ("value", JsonValue.Create(value))), WireJsonContext.Default.SecretMetadata, cancellationToken);
     public Task<SecretMetadata> AddSecretAsync(string bucket, string key, JsonElement value, CancellationToken cancellationToken = default) =>
         WriteTypedSecretAsync("secret.create", bucket, key, value, null, cancellationToken);
     public Task<Secret> ReadSecretAsync(string bucket, string key, CancellationToken cancellationToken = default) =>
-        ExecuteAsync<Secret>("secret.read", new { bucket, key }, cancellationToken);
+        ExecuteTypedAsync("secret.read", Parameters(("bucket", JsonValue.Create(bucket)), ("key", JsonValue.Create(key))), WireJsonContext.Default.Secret, cancellationToken);
     public Task<Page<SecretMetadata>> ListSecretsAsync(string bucket, string? cursor = null, int limit = 100, CancellationToken cancellationToken = default) =>
-        ExecuteAsync<Page<SecretMetadata>>("secret.list", new { bucket, cursor, limit }, cancellationToken);
+        ExecuteTypedAsync("secret.list", Parameters(("bucket", JsonValue.Create(bucket)), ("cursor", JsonValue.Create(cursor)), ("limit", JsonValue.Create(limit))), WireJsonContext.Default.PageSecretMetadata, cancellationToken);
     public Task<SecretMetadata> UpdateSecretAsync(string bucket, string key, string value, long expectedRevision, CancellationToken cancellationToken = default) =>
-        ExecuteAsync<SecretMetadata>("secret.update", new { bucket, key, value, expectedRevision }, cancellationToken);
+        ExecuteTypedAsync("secret.update", Parameters(("bucket", JsonValue.Create(bucket)), ("key", JsonValue.Create(key)), ("value", JsonValue.Create(value)), ("expectedRevision", JsonValue.Create(expectedRevision))), WireJsonContext.Default.SecretMetadata, cancellationToken);
     public Task<SecretMetadata> UpdateSecretAsync(string bucket, string key, JsonElement value, long expectedRevision, CancellationToken cancellationToken = default) =>
         WriteTypedSecretAsync("secret.update", bucket, key, value, expectedRevision, cancellationToken);
     public Task<SecretMetadata> SetSecretAsync(string bucket, string key, string value, long expectedRevision = 0, CancellationToken cancellationToken = default) =>
-        ExecuteAsync<SecretMetadata>("secret.set", new { bucket, key, value, expectedRevision }, cancellationToken);
+        ExecuteTypedAsync("secret.set", Parameters(("bucket", JsonValue.Create(bucket)), ("key", JsonValue.Create(key)), ("value", JsonValue.Create(value)), ("expectedRevision", JsonValue.Create(expectedRevision))), WireJsonContext.Default.SecretMetadata, cancellationToken);
     public Task<SecretMetadata> SetSecretAsync(string bucket, string key, JsonElement value, long expectedRevision = 0, CancellationToken cancellationToken = default) =>
         WriteTypedSecretAsync("secret.set", bucket, key, value, expectedRevision, cancellationToken);
     private Task<SecretMetadata> WriteTypedSecretAsync(string operation, string bucket, string key, JsonElement input, long? revision, CancellationToken ct) {
         var (value, type) = SecretValues.Encode(input);
-        var parameters = new Dictionary<string, object?> { ["bucket"] = bucket, ["key"] = key, ["value"] = value, ["type"] = type };
-        if (revision is not null) parameters["expectedRevision"] = revision.Value;
-        return ExecuteAsync<SecretMetadata>(operation, parameters, ct);
+        var parameters = Parameters(("bucket", JsonValue.Create(bucket)), ("key", JsonValue.Create(key)), ("value", JsonValue.Create(value)), ("type", JsonValue.Create(type)));
+        if (revision is not null) parameters["expectedRevision"] = JsonValue.Create(revision.Value);
+        return ExecuteTypedAsync(operation, parameters, WireJsonContext.Default.SecretMetadata, ct);
     }
     public async Task DeleteSecretAsync(string bucket, string key, long expectedRevision, CancellationToken cancellationToken = default) =>
-        _ = await ExecuteAsync<JsonElement>("secret.delete", new { bucket, key, expectedRevision }, cancellationToken);
-    public Task<TokenInfo> GetTokenInfoAsync(CancellationToken cancellationToken = default) => ExecuteAsync<TokenInfo>("token.info", new { }, cancellationToken);
+        _ = await ExecuteTypedAsync("secret.delete", Parameters(("bucket", JsonValue.Create(bucket)), ("key", JsonValue.Create(key)), ("expectedRevision", JsonValue.Create(expectedRevision))), WireJsonContext.Default.JsonElement, cancellationToken);
+    public Task<TokenInfo> GetTokenInfoAsync(CancellationToken cancellationToken = default) =>
+        ExecuteTypedAsync("token.info", new JsonObject(), WireJsonContext.Default.TokenInfo, cancellationToken);
 
-    public async Task<T> ExecuteAsync<T>(string operation, object parameters, CancellationToken cancellationToken = default) {
+    private static JsonObject Parameters(params (string Name, JsonNode? Value)[] values) {
+        var result = new JsonObject();
+        foreach (var (name, value) in values) result[name] = value;
+        return result;
+    }
+    private Task<T> ExecuteTypedAsync<T>(string operation, JsonObject parameters, System.Text.Json.Serialization.Metadata.JsonTypeInfo<T> resultType, CancellationToken cancellationToken) =>
+        ExecuteCoreAsync(operation, JsonSerializer.SerializeToElement(parameters, WireJsonContext.Default.JsonObject), resultType, cancellationToken);
+
+    [System.Diagnostics.CodeAnalysis.RequiresDynamicCode("Use the JsonElement and JsonTypeInfo overload for Native AOT.")]
+    [System.Diagnostics.CodeAnalysis.RequiresUnreferencedCode("Use the JsonElement and JsonTypeInfo overload for trimming-safe serialization.")]
+    public Task<T> ExecuteAsync<T>(string operation, object parameters, CancellationToken cancellationToken = default) =>
+        ExecuteCoreAsync(operation, Wire.ToElement(parameters), Wire.TypeInfo<T>(Wire.ResponseJson), cancellationToken);
+    public Task<T> ExecuteAsync<T>(string operation, JsonElement parameters, System.Text.Json.Serialization.Metadata.JsonTypeInfo<T> resultType, CancellationToken cancellationToken = default) =>
+        ExecuteCoreAsync(operation, parameters, resultType, cancellationToken);
+    private async Task<T> ExecuteCoreAsync<T>(string operation, JsonElement parameters, System.Text.Json.Serialization.Metadata.JsonTypeInfo<T> resultType, CancellationToken cancellationToken) {
         using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         deadline.CancelAfter(TimeSpan.FromSeconds(30));
         var ct = deadline.Token;
+        var startedAt = System.Diagnostics.Stopwatch.GetTimestamp();
         var read = operation.EndsWith(".read", StringComparison.Ordinal) || operation.EndsWith(".get", StringComparison.Ordinal) ||
                    operation.EndsWith(".list", StringComparison.Ordinal) || operation == "token.info";
         var keyRetry = false;
         for (var attempt = 0; ; attempt++) {
+            // Failures before the execute request is sent (key discovery) cannot have changed state.
+            var sent = false;
             try {
-                var current = key;
-                if (current is null || DateTimeOffset.UtcNow - keyFetched > TimeSpan.FromMinutes(5) || current.NotAfter <= DateTimeOffset.UtcNow) {
+                var cached = Volatile.Read(ref key);
+                CryptoKey current;
+                if (cached is not null && DateTimeOffset.UtcNow - cached.FetchedAt <= TimeSpan.FromMinutes(5) && cached.Value.NotAfter > DateTimeOffset.UtcNow) {
+                    current = cached.Value;
+                } else {
                     using var discovery = new HttpRequestMessage(HttpMethod.Get, new Uri(endpoint, "api/v1/crypto/key"));
                     using var response = await http.SendAsync(discovery, HttpCompletionOption.ResponseHeadersRead, ct);
                     EnsureOrigin(response, discovery.RequestUri!);
+                    if ((int)response.StatusCode is >= 300 and < 400) throw new DarkVaultException("redirect_rejected", (int)response.StatusCode);
                     if (!response.IsSuccessStatusCode) throw new DarkVaultException("key_unavailable", (int)response.StatusCode);
-                    current = Wire.Parse<CryptoKey>(await Wire.ReadBodyAsync(await response.Content.ReadAsStreamAsync(ct), ct));
+                    current = JsonSerializer.Deserialize(await Wire.ReadBodyAsync(await response.Content.ReadAsStreamAsync(ct), ct), Wire.TypeInfo<CryptoKey>(Wire.ResponseJson)) ?? throw new DarkVaultException("invalid_key", 0);
                     if (current.ProtocolVersion != 1 || current.NotAfter <= DateTimeOffset.UtcNow || !Guid.TryParse(current.ServerId, out _) || !Guid.TryParse(current.Kid, out _) || current.ServerTime.Offset != TimeSpan.Zero || current.Limits.MaxBodyBytes is < 1 or > Wire.MaxBody || current.Limits.MaxPlaintextBytes is < 1 or > Wire.MaxPlaintext)
                         throw new DarkVaultException("invalid_key", 0);
                     using var validated = Wire.Import(current.PublicKey);
-                    key = current; keyFetched = DateTimeOffset.UtcNow;
+                    Volatile.Write(ref key, new CachedKey(current, DateTimeOffset.UtcNow));
                 }
                 using var reply = ECDsa.Create(ECCurve.NamedCurves.nistP256);
                 var id = Guid.NewGuid().ToString();
                 var request = new VaultRequest(1, id, DateTimeOffset.UtcNow, current.ServerId, "data", operation,
-                    Wire.ToElement(parameters), Wire.Export(reply));
+                    parameters, Wire.Export(reply));
                 var body = Wire.Encrypt(Wire.Serialize(request), current.PublicKey, current.Kid, "darkvault-request+jwe");
                 using var message = new HttpRequestMessage(HttpMethod.Post, new Uri(endpoint, "api/v1/execute"));
                 message.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
                 message.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/jose"));
                 message.Content = new StringContent(body, Encoding.UTF8, "application/jose");
+                sent = true;
                 using var result = await http.SendAsync(message, HttpCompletionOption.ResponseHeadersRead, ct);
                 EnsureOrigin(result, message.RequestUri!);
+                if ((int)result.StatusCode is >= 300 and < 400) throw new DarkVaultException("redirect_rejected", (int)result.StatusCode);
                 var text = await Wire.ReadBodyAsync(await result.Content.ReadAsStreamAsync(ct), ct);
                 if (result.Content.Headers.ContentType?.MediaType != "application/jose") {
                     string code = "transport_error";
                     try { using var error = JsonDocument.Parse(text); code = error.RootElement.GetProperty("error").GetProperty("code").GetString() ?? code; } catch (Exception ex) when (ex is JsonException or KeyNotFoundException or InvalidOperationException) { }
-                    if (code == "unknown_key" && result.StatusCode == HttpStatusCode.BadRequest && !keyRetry) { key = null; keyRetry = true; continue; }
+                    if (code == "unknown_key" && result.StatusCode == HttpStatusCode.BadRequest && !keyRetry) { Volatile.Write(ref key, null); keyRetry = true; continue; }
                     if (result.IsSuccessStatusCode) throw new DarkVaultException("unencrypted_response", (int)result.StatusCode, id);
+                    var retryAfter = result.Headers.RetryAfter is { } header ? header.Delta ?? header.Date - DateTimeOffset.UtcNow : null;
+                    if (retryAfter < TimeSpan.Zero) retryAfter = TimeSpan.Zero;
                     if (read && attempt < 2 && (result.StatusCode == HttpStatusCode.TooManyRequests || (int)result.StatusCode >= 500)) {
-                        var delay = result.Headers.RetryAfter?.Delta ?? TimeSpan.FromMilliseconds(200 * (attempt + 1) + Random.Shared.Next(100));
+                        var delay = retryAfter ?? TimeSpan.FromMilliseconds(200 * (attempt + 1) + Random.Shared.Next(100));
+                        var remaining = TimeSpan.FromSeconds(30) - System.Diagnostics.Stopwatch.GetElapsedTime(startedAt);
+                        if (delay >= remaining) throw new DarkVaultException(code, (int)result.StatusCode, id, retryAfter);
                         await Task.Delay(delay, ct); continue;
                     }
-                    throw new DarkVaultException(code, (int)result.StatusCode, id);
+                    throw new DarkVaultException(code, (int)result.StatusCode, id, retryAfter);
                 }
                 var plain = Wire.Decrypt(text, reply, id, "darkvault-response+jwe");
                 var envelope = JsonSerializer.Deserialize(plain, Wire.TypeInfo<VaultResponse>(Wire.ResponseJson)) ?? throw new FormatException();
                 if (envelope.V != 1 || envelope.RequestId != id || envelope.ServerId != current.ServerId || envelope.Audience != "data" ||
                     envelope.Operation != operation || envelope.Status != (int)result.StatusCode) throw new DarkVaultException("invalid_response", 0, id);
-                if (envelope.Error is not null) throw new DarkVaultException(envelope.Error.Code, envelope.Status, id);
+                if (envelope.Error is not null) { if (result.IsSuccessStatusCode) throw new DarkVaultException("invalid_response", 0, id); throw new DarkVaultException(envelope.Error.Code, envelope.Status, id); }
                 if (!result.IsSuccessStatusCode || envelope.Data is null) throw new DarkVaultException("invalid_response", 0, id);
-                return envelope.Data.Value.Deserialize(Wire.TypeInfo<T>(Wire.ResponseJson)) ?? throw new DarkVaultException("invalid_response", 0, id);
-            } catch (HttpRequestException) when (read && attempt < 2) {
+                return envelope.Data.Value.Deserialize(resultType) ?? throw new DarkVaultException("invalid_response", 0, id);
+            } catch (Exception ex) when ((ex is HttpRequestException or IOException) && (read || !sent) && attempt < 2) {
                 await Task.Delay(200 * (attempt + 1) + Random.Shared.Next(100), ct);
-            } catch (HttpRequestException) {
-                throw new DarkVaultException(read ? "unavailable" : "outcome_unknown", 0);
+            } catch (Exception ex) when (ex is HttpRequestException or IOException) {
+                throw new DarkVaultException(read || !sent ? "unavailable" : "outcome_unknown", 0);
             } catch (DecoderFallbackException) {
                 throw new DarkVaultException("invalid_response", 0);
-            } catch (Exception ex) when (ex is FormatException or InvalidDataException or JsonException or CryptographicException or Jose.JoseException) {
+            } catch (Exception ex) when (ex is FormatException or InvalidDataException or JsonException or CryptographicException or Jose.JoseException or InvalidOperationException or KeyNotFoundException) {
                 throw new DarkVaultException("invalid_response", 0);
             }
         }

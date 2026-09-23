@@ -6,6 +6,7 @@ import (
 	"crypto/x509"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -31,6 +32,25 @@ func TestEnvironment(t *testing.T) {
 	}
 	if _, e = Environment(nil, map[string]string{"BAD-NAME": "x"}, false, false); e == nil {
 		t.Fatal("bad name accepted")
+	}
+	// Windows keeps per-drive working directories as "=C:=..." entries; each must survive unchanged.
+	drives, e := Environment([]string{`=C:=C:\work`, `=D:=D:\data`}, nil, false, false)
+	if e != nil {
+		t.Fatal(e)
+	}
+	if strings.Join(drives, "|") != `=C:=C:\work|=D:=D:\data` {
+		t.Fatalf("drive variables changed: %q", drives)
+	}
+}
+func TestBucketUpdateRequiresAChange(t *testing.T) {
+	cleanEnvironment(t)
+	cmd := Command()
+	cmd.SetOut(io.Discard)
+	cmd.SetErr(io.Discard)
+	// The unreachable server proves the command fails locally, before any request could clear the description.
+	cmd.SetArgs([]string{"--config", filepath.Join(t.TempDir(), "config.json"), "--server", "https://127.0.0.1:1", "--token", "dv1_" + strings.Repeat("A", 60), "bucket", "update", "qa", "--revision", "1"})
+	if e := cmd.Execute(); e == nil || e.Error() != "set --name or --description" {
+		t.Fatalf("bucket update without changes: %v", e)
 	}
 }
 func TestLiveCLI(t *testing.T) {
@@ -119,6 +139,14 @@ func TestLiveCLI(t *testing.T) {
 	added := run("secret", "add", "go_live", "Redis:Port", "--type", "number", "--stdin")
 	if added["type"] != "number" {
 		t.Fatal("CLI lost secret type")
+	}
+	if _, err = input.Seek(0, 0); err != nil {
+		t.Fatal(err)
+	}
+	// An update without --type keeps the stored type instead of silently turning it into a string.
+	kept := run("secret", "update", "go_live", "Redis:Port", "--revision", fmt.Sprint(added["revision"]), "--stdin")
+	if kept["type"] != "number" {
+		t.Fatal("update without --type changed the secret type")
 	}
 	t.Setenv("DARKVAULT_URL", strings.Replace(descriptor.URL, "https://", "https://"+string(token)+"@", 1)+"/go_live")
 	if runText("secret", "get", "Redis:Port") != "6379" {

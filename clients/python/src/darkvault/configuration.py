@@ -2,7 +2,8 @@
 
 import json
 import math
-from typing import Any
+from typing import Any, cast
+from collections.abc import Mapping
 
 SecretScalar = str | int | float | bool | None
 SECRET_TYPES = {"string", "number", "boolean", "null"}
@@ -29,16 +30,16 @@ def parse_scalar(value: str, secret_type: str = "string") -> SecretScalar:
     if secret_type == "string":
         return value
     try:
-        parsed = json.loads(value)
+        parsed: Any = json.loads(value)
         encoded = encode_scalar(parsed)
         if encoded["type"] == secret_type:
-            return parsed
+            return cast(SecretScalar, parsed)
     except (ValueError, TypeError):
         pass
     raise ValueError("Invalid secret type or scalar value")
 
 
-def typed_secrets(snapshot: dict[str, Any]) -> dict[str, SecretScalar]:
+def typed_secrets(snapshot: Mapping[str, Any]) -> dict[str, SecretScalar]:
     if "types" not in snapshot or not isinstance(snapshot["types"], dict):
         raise ValueError("Invalid secret type map")
     types = snapshot["types"]

@@ -76,7 +76,7 @@ func resolveConfiguration(cmd *cobra.Command, filename string) (config.Settings,
 		if tokenFile == "" {
 			err = errors.New("token file path is empty")
 		}
-	case connection != nil:
+	case connection != nil && !cmd.Flags().Changed("server"):
 		settings.Token = connection.Token()
 	case os.Getenv("DARKVAULT_TOKEN_FILE") != "":
 		tokenFile = os.Getenv("DARKVAULT_TOKEN_FILE")

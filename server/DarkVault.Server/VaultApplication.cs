@@ -3,7 +3,6 @@ using System.Net;
 using System.Security.Cryptography;
 using System.Text.Json;
 using System.Threading.RateLimiting;
-using DarkVault.Client;
 using Microsoft.AspNetCore.Antiforgery;
 using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.AspNetCore.Http.Features;
@@ -25,6 +24,9 @@ public static class VaultApplication {
             o.Limits.MaxRequestHeadersTotalSize = 16 * 1024; o.Limits.MaxRequestHeaderCount = 64;
             o.Limits.MaxConcurrentConnections = 256;
         });
+        if (builder.Configuration["Audit:RetentionDays"] is { } retention)
+            store.AuditRetention = int.TryParse(retention, System.Globalization.CultureInfo.InvariantCulture, out var days) && days is >= 1 and <= 3650
+                ? TimeSpan.FromDays(days) : throw new InvalidOperationException("Audit:RetentionDays must be an integer from 1 to 3650.");
         builder.Services.AddSingleton(store); builder.Services.AddSingleton(ring);
         builder.Services.AddSingleton<AdminSessions>();
         builder.Services.AddSingleton<SecurityLimits>();
@@ -66,6 +68,7 @@ public static class VaultApplication {
                 }
             };
             RequestAudit.Attach(c, audit);
+            c.Response.OnStarting(() => { c.Response.Headers["X-Request-Id"] = audit.TraceId; return Task.CompletedTask; });
             try { await next(c); } finally {
                 if (c.RequestAborted.IsCancellationRequested) audit.Error ??= "request_aborted";
                 var entry = audit.Complete(c.Response.StatusCode);
@@ -86,7 +89,7 @@ public static class VaultApplication {
             c.Response.Headers.CacheControl = "no-store"; c.Response.Headers.XContentTypeOptions = "nosniff";
             c.Response.Headers["Referrer-Policy"] = "no-referrer";
             c.Response.Headers.ContentSecurityPolicy = "default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'";
-            if (!c.Request.IsHttps && c.Request.Path != "/health/ready") { await Error(c, 400, "https_required"); return; }
+            if (!c.Request.IsHttps && c.Request.Path != "/health/ready" && !LocalMetrics(c)) { await Error(c, 400, "https_required"); return; }
             if (c.Request.IsHttps) c.Response.Headers.StrictTransportSecurity = "max-age=31536000";
             using var networkLease = limits.Network.AttemptAcquire(c);
             if (!networkLease.IsAcquired) { await RateLimited(c, networkLease); return; }
@@ -100,16 +103,22 @@ public static class VaultApplication {
             if (adminBody && c.Features.Get<IHttpMaxRequestBodySizeFeature>() is { IsReadOnly: false } bodySize) bodySize.MaxRequestBodySize = 64 * 1024;
             using var timeout = CancellationTokenSource.CreateLinkedTokenSource(c.RequestAborted); timeout.CancelAfter(TimeSpan.FromSeconds(30)); c.RequestAborted = timeout.Token;
             try {
+                var invalidBearer = false;
                 if (c.Request.Path == "/api/v1/execute") {
                     var auth = c.Request.Headers.Authorization.ToString();
-                    try { audit.Identify(store.Authenticate(auth.StartsWith("Bearer ", StringComparison.Ordinal) ? auth[7..] : "")); } catch (VaultFault) { abuse.Failed(c.Connection.RemoteIpAddress, false); AuthenticationFailed(c, securityLog, "api"); await Error(c, 401, "unauthorized"); return; }
-                } else _ = c.RequestServices.GetRequiredService<AdminSessions>().Get(c, store);
+                    try { audit.Identify(store.Authenticate(auth.StartsWith("Bearer ", StringComparison.Ordinal) ? auth[7..] : "")); } catch (VaultFault) { abuse.Failed(c.Connection.RemoteIpAddress, false); AuthenticationFailed(c, securityLog, "api"); invalidBearer = true; }
+                } else if (c.RequestServices.GetRequiredService<AdminSessions>().Get(c, store) is { } admin) audit.Identify(new(admin.Id, true));
+                if (c.Request.Path != "/health/ready") {
+                    using var globalLease = (audit.Actor is null ? limits.AnonymousRequests : limits.AuthenticatedRequests).AttemptAcquire();
+                    if (!globalLease.IsAcquired) { await RateLimited(c, globalLease); return; }
+                }
+                if (invalidBearer) { await Error(c, 401, "unauthorized"); return; }
                 if (audit.Actor is { } actor) {
                     using var principalLease = limits.Principals.AttemptAcquire((actor.IsAdmin ? "admin:" : "token:") + actor.Id);
                     if (!principalLease.IsAcquired) { await RateLimited(c, principalLease); return; }
                 }
                 await next(c);
-            } catch (OperationCanceledException) { await Failure(c, 503, "unavailable"); } catch (VaultFault ex) { await Failure(c, ex.Status, ex.Code); } catch (BadHttpRequestException ex) when (ex.StatusCode == 413) { await Failure(c, 413, "payload_too_large"); } catch (InvalidDataException) { await Failure(c, 413, "payload_too_large"); } catch (Exception ex) when (ex is JsonException or FormatException or KeyNotFoundException or InvalidOperationException or ArgumentException) { await Failure(c, 400, "invalid_request"); } catch (Exception) { await Failure(c, 503, "unavailable"); }
+            } catch (OperationCanceledException) { await Failure(c, 503, "unavailable"); } catch (VaultFault ex) { await Failure(c, ex.Status, ex.Code); } catch (BadHttpRequestException ex) when (ex.StatusCode == 413) { await Failure(c, 413, "payload_too_large"); } catch (InvalidDataException) { await Failure(c, 413, "payload_too_large"); } catch (Exception ex) { app.Logger.LogError("Unhandled request failure. TraceId={TraceId} Type={ExceptionType}", RequestAudit.Get(c).TraceId, ex.GetType().Name); await Failure(c, 503, "unavailable"); }
         });
         app.UseDefaultFiles(); app.UseStaticFiles();
         // Only UI routes receive the SPA shell; unknown API and asset paths remain 404.
@@ -120,11 +129,12 @@ public static class VaultApplication {
             System.Text.RegularExpressions.Regex.IsMatch(name, @"\A[a-z0-9][a-z0-9_-]{0,62}\z", System.Text.RegularExpressions.RegexOptions.CultureInvariant)
                 ? (IResult)Results.File(shell, "text/html; charset=utf-8") : Results.NotFound());
         app.MapGet("/health/ready", () => { store.Ready(); return Results.Json(new HealthResult("ready"), ServerJson.TypeInfo<HealthResult>()); });
+        app.MapGet("/metrics", (HttpContext c) => LocalMetrics(c) ? Results.Text(RequestAudit.PrometheusMetrics(), "text/plain; version=0.0.4; charset=utf-8") : Results.NotFound());
         app.MapGet("/api/v1/crypto/key", () => Results.Json(ring.Public(), ServerJson.TypeInfo<CryptoKey>()));
-        app.MapGet("/admin/api/v1/session", (HttpContext c, IAntiforgery csrf, AdminSessions sessions) => Results.Json(new SessionResult(sessions.Get(c, store) is not null, csrf.GetAndStoreTokens(c).RequestToken), ServerJson.TypeInfo<SessionResult>()));
+        app.MapGet("/admin/api/v1/session", (HttpContext c, IAntiforgery csrf, AdminSessions sessions) => { var authenticated = sessions.Get(c, store) is not null; return Results.Json(new SessionResult(authenticated, csrf.GetAndStoreTokens(c).RequestToken, authenticated ? ServerCommands.InformationalVersion : null), ServerJson.TypeInfo<SessionResult>()); });
         app.MapPost("/admin/login", async (HttpContext c, IAntiforgery csrf, AdminSessions sessions, AdminMfa mfa) => {
             if (!await csrf.IsRequestValidAsync(c)) { await Error(c, 400, "csrf_failed"); return; }
-            var credentials = ServerJson.Parse<LoginRequest>(await Wire.ReadBodyAsync(c.Request.Body, c.RequestAborted));
+            var credentials = await ReadRequest<LoginRequest>(c);
             var admin = await CheckPassword(c, store, limits, credentials.Password);
             if (c.Response.StatusCode == 429) return;
             if (credentials.Username != "admin" || admin is null) { abuse.Failed(c.Connection.RemoteIpAddress, true); AuthenticationFailed(c, securityLog, "login"); await Error(c, 401, "unauthorized"); return; }
@@ -143,7 +153,7 @@ public static class VaultApplication {
             if (!await csrf.IsRequestValidAsync(c)) { await Error(c, 400, "csrf_failed"); return; }
             if (sessions.Get(c, store) is null) throw new VaultFault(401, "unauthorized");
             sessions.RequireRecent(c);
-            var input = ServerJson.Parse<PasswordRequest>(await Wire.ReadBodyAsync(c.Request.Body, c.RequestAborted));
+            var input = await ReadRequest<PasswordRequest>(c);
             var admin = await CheckPassword(c, store, limits, input.CurrentPassword);
             if (c.Response.StatusCode == 429) return;
             if (admin is null) { abuse.Failed(c.Connection.RemoteIpAddress, true); AuthenticationFailed(c, securityLog, "login"); throw new VaultFault(401, "unauthorized"); }
@@ -163,6 +173,13 @@ public static class VaultApplication {
         }
         try { return store.Login(password); } finally { limits.PasswordConcurrency.Release(); }
     }
+    // Metrics are for a scraper on the same host. A loopback peer carrying forwarding headers
+    // is a reverse proxy relaying a remote client, so it is refused as well.
+    private static bool LocalMetrics(HttpContext c) =>
+        c.Request.Path == "/metrics" && c.Connection.RemoteIpAddress is { } ip && IPAddress.IsLoopback(ip)
+        && !c.Request.Headers.ContainsKey("X-Forwarded-For") && !c.Request.Headers.ContainsKey("X-Original-For")
+        && !c.Request.Headers.ContainsKey("Forwarded");
+
     private static Task RateLimited(HttpContext c, RateLimitLease lease) {
         c.Response.Headers.RetryAfter = SecurityLimits.RetryAfter(lease).ToString(System.Globalization.CultureInfo.InvariantCulture);
         return Error(c, 429, "rate_limited");
@@ -211,6 +228,12 @@ public static class VaultApplication {
             var encrypted = Wire.Encrypt(ServerJson.Serialize(response), request.ReplyKey, request.RequestId, "darkvault-response+jwe");
             c.Response.StatusCode = status; c.Response.ContentType = "application/jose"; await c.Response.WriteAsync(encrypted, c.RequestAborted);
         } finally { admission.Release(); }
+    }
+    private static async Task<T> ReadRequest<T>(HttpContext c) {
+        var body = await Wire.ReadBodyAsync(c.Request.Body, c.RequestAborted);
+        try { return ServerJson.Parse<T>(body); } catch (Exception ex) when (ex is JsonException or FormatException or KeyNotFoundException or InvalidOperationException or ArgumentException) {
+            throw new VaultFault(400, "invalid_request");
+        }
     }
     private static Task Failure(HttpContext c, int status, string code) {
         RequestAudit.Get(c).Error = code;

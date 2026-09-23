@@ -397,7 +397,7 @@ func (c *Client) discoverServerKey(ctx context.Context, transport *http.Client) 
 	}
 	r, err := transport.Do(discovery)
 	if err != nil {
-		return ServerKey{}, errors.New("server unavailable")
+		return ServerKey{}, fmt.Errorf("server unavailable: %w", err)
 	}
 	body, err := readBody(r.Body)
 	r.Body.Close()
@@ -405,7 +405,7 @@ func (c *Client) discoverServerKey(ctx context.Context, transport *http.Client) 
 		return ServerKey{}, err
 	}
 	if r.StatusCode != http.StatusOK {
-		return ServerKey{}, &APIError{Code: "key_unavailable", Status: r.StatusCode}
+		return ServerKey{}, plainAPIError(body, r.StatusCode, "", r.Header)
 	}
 	var key ServerKey
 	if err = ValidateJSON(body); err != nil {
@@ -459,6 +459,17 @@ func plainAPIError(body []byte, status int, requestID string, headers http.Heade
 	}
 	return &APIError{Code: code, Status: status, RequestID: requestID, RetryAfter: parseRetryAfter(headers.Get("Retry-After"))}
 }
+func (c *Client) ExecuteValidated(ctx context.Context, op string, parameters any) (json.RawMessage, error) {
+	data, err := c.Execute(ctx, op, parameters)
+	if err != nil {
+		return nil, err
+	}
+	if err = validateData(op, data); err != nil {
+		return nil, fmt.Errorf("invalid response data: %w", err)
+	}
+	return data, nil
+}
+
 func (c *Client) Execute(ctx context.Context, op string, parameters any) (json.RawMessage, error) {
 	if c.HTTP == nil {
 		return nil, errors.New("HTTP client is required")
@@ -509,7 +520,7 @@ func (c *Client) Execute(ctx context.Context, op string, parameters any) (json.R
 		message.Header.Set("Accept", "application/jose")
 		r, err := transport.Do(message)
 		if err != nil {
-			return nil, errors.New("request outcome unknown; verify state before retrying")
+			return nil, fmt.Errorf("request outcome unknown; verify state before retrying: %w", err)
 		}
 		body, err := readBody(r.Body)
 		r.Body.Close()
@@ -527,7 +538,7 @@ func (c *Client) Execute(ctx context.Context, op string, parameters any) (json.R
 		}
 		plain, err = Decrypt(string(body), reply, id, "darkvault-response+jwe")
 		if err != nil {
-			return nil, errors.New("invalid encrypted response")
+			return nil, fmt.Errorf("invalid encrypted response: %w", err)
 		}
 		var response Response
 		if err = json.Unmarshal(plain, &response); err != nil {

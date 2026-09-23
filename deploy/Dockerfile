@@ -8,7 +8,7 @@ ARG TARGETARCH
 WORKDIR /app
 
 # The release workflow stages the matching Native AOT archive under amd64/ or arm64/.
-COPY --chown=1654:1654 ${TARGETARCH}/ /app/
+COPY ${TARGETARCH}/ /app/
 
 ENV ASPNETCORE_URLS=http://0.0.0.0:8866 \
     DARKVAULT_DATA=/data
@@ -19,4 +19,5 @@ RUN mkdir /data && chown 1654:1654 /data
 VOLUME ["/data"]
 EXPOSE 8866
 USER 1654:1654
+HEALTHCHECK --interval=30s --timeout=3s --start-period=15s --retries=3 CMD ["/app/DarkVault.Server", "healthcheck"]
 ENTRYPOINT ["/app/DarkVault.Server"]

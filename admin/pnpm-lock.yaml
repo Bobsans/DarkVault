@@ -11,9 +11,6 @@ importers:
       '@darkvault/client':
         specifier: link:../clients/typescript
         version: link:../clients/typescript
-      jose:
-        specifier: 6.2.12
-        version: 6.2.12
     devDependencies:
       '@playwright/test':
         specifier: 1.63.0
@@ -21,6 +18,9 @@ importers:
       esbuild:
         specifier: 0.28.2
         version: 0.28.2
+      jose:
+        specifier: 6.2.12
+        version: 6.2.12
       typescript:
         specifier: 7.0.2
         version: 7.0.2
