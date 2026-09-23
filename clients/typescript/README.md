@@ -14,7 +14,7 @@ Ships ESM JavaScript and TypeScript declarations; `jose` handles JWE encryption.
 npm install @darkvault/client
 ```
 
-Requires Node.js 22+ or a modern browser environment with Fetch, Web Crypto,
+Requires Node.js 24+ or a modern browser environment with Fetch, Web Crypto,
 `AbortSignal.timeout`, and `AbortSignal.any`. The package is ESM, not CommonJS.
 
 ## Quick start (Node.js)

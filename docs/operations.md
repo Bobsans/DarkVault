@@ -21,7 +21,7 @@ cd cli
 go build -trimpath -o ../artifacts/cli/darkvault.exe .
 ```
 
-Node 22+ и pnpm 11 нужны для сборки, но не для запуска готового сервера.
+Node 24+ и pnpm 11 нужны для сборки, но не для запуска готового сервера.
 Тестовые проекты собирают сервер и клиентские библиотеки через `ProjectReference`.
 `dotnet build` и `dotnet publish` собирают TypeScript SDK и SPA из `admin/`, затем
 включают HTML, CSS и JavaScript в выходной `wwwroot/`. Библиотеки JOSE входят

@@ -175,7 +175,11 @@ test('Transport protections reject unsafe responses with stable codes', async ()
     await assert.rejects(extra.getTokenInfo(), error => error instanceof DarkVaultError && error.code === 'forbidden', 'unknown key fields are ignored');
     const stalled = new DarkVaultClient('vault.example.com', token, { timeoutMs: 50, fetch: async (url, options) => {
         if (url.endsWith('/crypto/key')) return json(serverKey);
-        return new Promise((_, reject) => options.signal.addEventListener('abort', () => reject(options.signal.reason)));
+        // AbortSignal.timeout does not keep the event loop alive; hold it open until the abort fires.
+        return new Promise((_, reject) => {
+            const hold = setTimeout(() => {}, 5000);
+            options.signal.addEventListener('abort', () => { clearTimeout(hold); reject(options.signal.reason); });
+        });
     } });
     await assert.rejects(stalled.getTokenInfo(), error => error instanceof DarkVaultError && error.code === 'timeout', 'read timeout');
 });

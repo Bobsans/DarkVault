@@ -4,7 +4,7 @@
 pwsh tools/verify.ps1
 ```
 
-Требования: .NET 10 SDK, Go SDK 1.25+, CLI Go 1.26+, Python 3.11+, Node.js 22+, pnpm 11 и PowerShell 7.
+Требования: .NET 10 SDK, Go SDK 1.25+, CLI Go 1.26+, Python 3.11+, Node.js 24+, pnpm 11 и PowerShell 7.
 CI использует точно закреплённые версии toolchain и digest базового образа
 (`.github/workflows/release.yml`, `deploy/Dockerfile`); локально допустимы совместимые версии.
 Для уже установленных frontend-зависимостей можно передать `-SkipInstall`;
@@ -147,7 +147,7 @@ job `release` собирает и публикует GitHub Release с верс�
 Упаковка одного проверенного RID: `pwsh tools/package-native-server.ps1 -Tag v1.2.3 -Runtime win-x64`.
 Перед этим выполните `verify.ps1 -NativeAot -Runtime win-x64 -ReleaseTag v1.2.3` на Windows x64.
 Собрав шесть архивов, выполните `pwsh tools/package-release.ps1 -Tag v1.2.3 -ServerAssets artifacts/native-assets`.
-Нужны .NET 10 SDK, Go, Python с модулем `build`, Node.js 22+, pnpm 11 и `tar`. Результаты находятся в
+Нужны .NET 10 SDK, Go, Python с модулем `build`, Node.js 24+, pnpm 11 и `tar`. Результаты находятся в
 `artifacts/releases/v1.2.3/assets`; каталог версии должен отсутствовать перед запуском.
 Unix-архивы сервера собираются на соответствующих Linux/macOS runners с сохранением прав исполнения.
 Версии Python и TypeScript меняются только на время упаковки и затем восстанавливаются.

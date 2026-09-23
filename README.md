@@ -33,7 +33,7 @@ its configuration through a native SDK or a single CLI command.
 | .NET configuration       | `dotnet add package DarkVault.Extensions.Configuration` | [Configuration provider](clients/csharp/DarkVault.Extensions.Configuration/README.md) |
 | Python 3.11+             | `python -m pip install darkvault-client`                | [Python SDK](clients/python/README.md)                                                |
 | Go 1.25+                 | `go get github.com/Bobsans/DarkVault/clients/go/v2@latest` | [Go SDK](clients/go/README.md)                                                        |
-| TypeScript / Node.js 22+ | `npm install @darkvault/client`                         | [TypeScript SDK](clients/typescript/README.md)                                        |
+| TypeScript / Node.js 24+ | `npm install @darkvault/client`                         | [TypeScript SDK](clients/typescript/README.md)                                        |
 | Command line             | Download the CLI for your OS                            | [CLI guide](cli/README.md)                                                            |
 
 See [GitHub Releases](https://github.com/Bobsans/DarkVault/releases) for binaries and
@@ -190,7 +190,7 @@ dotnet publish server/DarkVault.Server/DarkVault.Server.csproj \
 ```
 
 The browser bundle is included; changing frontend sources additionally requires
-Node.js 22+ and pnpm 11. Contributor checks run with `pwsh tools/verify.ps1`.
+Node.js 24+ and pnpm 11. Contributor checks run with `pwsh tools/verify.ps1`.
 
 ## Give it a try
 
