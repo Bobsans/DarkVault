@@ -2,7 +2,7 @@
 
 ARG TARGETARCH
 # Pinned by digest; update the tag and digest together in a separate change.
-FROM mcr.microsoft.com/dotnet/runtime-deps:10.0@sha256:099f6f87ed745377dd27bd722f0d1a352bca71b4fddaabfd75e7c064bcaa82da
+FROM mcr.microsoft.com/dotnet/runtime-deps:10.0@sha256:12dd273c196e92aa91542749b8df0996f497f812811abba9e6613b484f681dd0
 
 ARG TARGETARCH
 WORKDIR /app
