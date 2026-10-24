@@ -38,7 +38,7 @@
     "prepack": "npm run build"
   },
   "dependencies": {
-    "jose": "6.2.12"
+    "jose": "6.2.13"
   },
   "devDependencies": {
     "typescript": "7.0.2"
