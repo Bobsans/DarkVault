@@ -13,7 +13,7 @@
   "devDependencies": {
     "@playwright/test": "1.63.0",
     "esbuild": "0.28.2",
-    "jose": "6.2.12",
+    "jose": "6.2.17",
     "typescript": "7.0.2"
   }
 }
